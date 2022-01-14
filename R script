@@ -1,0 +1,3333 @@
+#-------------------
+# Getting started
+#-------------------
+
+install.packages("rio")
+install.packages("Rtools")
+install.packages("dplyr")
+install.packages("raster")
+install.packages("ggplot2")
+install.packages("rgdal")
+install.packages("ggpubr")
+install.packages("rstatix")
+install.packages("FSA")
+install.packages("maps")
+install.packages("viridis")
+install.packages("rgeos")
+install.packages("ggridges")
+install.packages("sf")
+install.packages("RColorBrewer")
+
+
+### load libraries
+require(rio)
+require(dplyr)
+library(raster)
+library(ggplot2)
+library(rgdal)
+library(ggpubr)
+library(rstatix) # permet d'integrer les p-values corrigées dans ggplot
+library(FSA) # perform Dunn test
+library(maps)
+library(viridis)
+library(rgeos) # garea (aires des polygones)
+library(ggridges) # flat violin
+library(sf) # raster to polygon
+library(RColorBrewer) 
+
+
+### Set workdir
+
+
+PATH <- "E:/NicheTherm" # Ordi Fixe
+PATH <- "G:/NicheTherm" # Ordi Portable
+PATH <- "//nas.unil.ch/ECOSPAT/projects-unil/NicheTherm"
+
+setwd(PATH)
+
+### Load data to quantify observed temperature limits -> limits of the realized niche ####
+
+#---- GBIF (occurence data with location coordinates)
+
+GBIF <- readRDS("Data/GBIF/GBIF_data_Globtherm.Rdata") # Takes a bit of time to be loaded
+head(GBIF)
+Nsp <- nlevels(factor(GBIF$species)) # Number of species present in the database 
+NoccPerSp <- table(GBIF$species) # number of occurences per species
+NoccPerSp[which.max(NoccPerSp)] # the species with the larger number of occurences
+NoccPerSp[which.min(NoccPerSp)] # the species with the lowest number of occurences
+hist(log(NoccPerSp))
+GBIF$species
+
+
+
+#---- IUCN (polygons -> needs to define a resolution to extract enviornmental information). Assumption: species present in all pixels falling within the polygon
+
+IUCN <- readRDS("Data/IUCN/Range_map_all_species.Rdata")
+class(IUCN)
+head(IUCN)
+head(IUCN@data)
+nlevels(factor(IUCN@data$binomial)) # Number of species present in the database 
+
+IUCN@polygons
+
+
+#---- Load climatic data
+
+clim <- getData("worldclim", var="bio", res=2.5) # 2.5' resolution
+plot(clim[[1]])
+names(clim)
+
+
+
+
+# note: GBIF data are known to suffer from spatial sampling bias and thus need to be "thinned" before analysis (this procedure also requires to define a reslution)
+# For IUCN range maps a resolution must be defined to extract the climatic iinformation in the pixels composing the polygon(s).
+# Once this is done, you can extract the min of BIO6 (= Min Temperature of Coldest Month) and the max of BIO5 (= Max Temperature of Warmest Month).
+
+### Load experimentally-derived critical thermal limits -> limits of the fundamental niche
+
+Exp.dataGT <- import("Data/Data_GlobalTherm.xlsx"); Exp.dataGT$species <- paste(Exp.dataGT$Genus, Exp.dataGT$Species, sep=" ") 
+head(Exp.data) # The columns Tmax and Tmin are the ones of interest. Read carefully the accompanying paper to figure out how to use this database
+Exp.dataGT$species <- paste(Exp.dataGT$Genus, Exp.dataGT$Species, sep=" ") 
+
+
+
+
+#### Plots jolis? ####
+
+MinMaxNewRed <- import("Data/MinMaxNewRed.csv")
+MinMaxAdaRed <- import("Data/MinMaxAdaRed.csv")
+
+
+p5 <- ggplot(MinMaxAdaRed, aes(max_iucn, max_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=max.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(10,50)+
+  ylim(10,50)+
+  xlab("Upper observed thermal limit according to IUCN (res: 1°) [°C]")+
+  ylab("Upper experimental thermal limit [°C]"); p5
+
+
+p6 <- ggplot(MinMaxAdaRed, aes(min_iucn, min_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=min.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Lower observed thermal limit according to IUCN (res: 1°) [°C]")+
+  ylab("Lower experimental thermal limit [°C]"); p6
+
+
+p1 <- ggplot(MinMaxNewRed, aes(max_iucn, max_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=max.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(10,50)+
+  ylim(10,50)+
+  xlab("IUCN upper thermal limits [°C]")+
+  ylab("Experimental upper thermal limit [°C]"); p1
+
+p2 <- ggplot(MinMaxNewRed, aes(min_iucn, min_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=min.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Lower observed thermal limit according to IUCN (res: 2.5') [°C]")+
+  ylab("Lower experimental thermal limit [°C]"); p2
+
+
+p3 <- ggplot(MinMaxNewRed, aes(max_gbif, max_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=max.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(10,50)+
+  ylim(10,50)+
+  xlab("IUCN upper thermal limits [°C]")+
+  ylab("Experimental upper thermal limit [°C]"); p3
+
+p4 <- ggplot(MinMaxNewRed, aes(min_gbif, min_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=min.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Lower observed thermal limit according to GBIF [°C]")+
+  ylab("Lower experimental thermal limit [°C]"); p4
+
+figure4 <- ggarrange(p5, p1, p3, labels=c("A", "B", "C"), ncol=3, common.legend = T, legend="right"); figure4
+figure4 <- ggarrange(p6, p2, p4, labels=c("A", "B", "C"), ncol=3, common.legend = T, legend="right"); figure4
+
+
+
+
+MaxNewVer <- import("Data/MaxNewVer.csv")
+
+df <- MaxNewVer
+df$classBis <- as.factor(df$classBis)
+
+stat.test <- df %>%
+  group_by(classBis) %>%
+  wilcox_test(max1 ~ data.origin1, paired = T) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test
+
+stat.test <- stat.test %>%
+  add_xy_position(x="classBis", dodge=0.8)
+
+p1 <- ggplot(MaxNewVer)+
+  geom_boxplot(aes(x=classBis, y=max1, fill=data.origin1))+
+  stat_pvalue_manual(stat.test, label = "{p.adj}", y.position = c(50, 56, 53) , label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=classBis, y=max1, group=data.origin1),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = "Database")+
+  xlab(NULL)+
+  ylab("Upper thermal limits [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p1
+
+
+
+MinNewVer <- import("Data/MinNewVer.csv")
+
+df1 <- MinNewVer
+df1$classBis <- as.factor(df1$classBis)
+
+stat.test1 <- df1 %>%
+  group_by(classBis) %>%
+  wilcox_test(min1 ~ data.origin1, paired = T) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test1
+
+stat.test1 <- stat.test1 %>%
+  add_xy_position(x="classBis", dodge=0.8)
+
+
+p2 <- ggplot(MinNewVer)+
+  geom_boxplot(aes(x=classBis, y=min1, fill=data.origin1))+
+  stat_pvalue_manual(stat.test1, label = "{p.adj}", y.position = c(40, 54, 47), label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=classBis, y=min1, group=data.origin1),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = "Database")+
+  xlab(NULL)+
+  ylab("Lower thermal limits [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p2
+
+ggarrange(p1,p2, labels = c("A", "B"), ncol = 2, common.legend = T)
+
+#### NEW COUNT ####
+
+### Présent
+bio5.0 <- clim[[5]] / 10
+bio6.0 <- clim[[6]] / 10
+wat5.0 <- raster("Present.Surface.Temperature.Max.BOv2_1.asc/Present.Surface.Temperature.Max.asc") #données marines de Bio-ORACLE
+wat6.0 <- raster("Present.Surface.Temperature.Min.BOv2_1.asc/Present.Surface.Temperature.Min.asc")
+wat5.0 <- round(wat5.0, digits = 2)
+wat6.0 <- round(wat6.0, digits = 2)
+
+
+### SSP. 1_2.6
+bio5.2 <- raster("wc_126_2100/band5.tif")
+bio6.2 <- raster("wc_126_2100/band6.tif")
+wat5.2 <- raster("RCP26.2100.Surface.Temperature.Max.BOv2_1.asc/2100AOGCM.RCP26.Surface.Temperature.Max.asc.BOv2_1.asc") #données marines de Bio-ORACLE
+wat6.2 <- raster("RCP26.2100.Surface.Temperature.Min.BOv2_1.asc/2100AOGCM.RCP26.Surface.Temperature.Min.asc.BOv2_1.asc")
+wat5.2 <- round(wat5.2, digits = 2)
+wat6.2 <- round(wat6.2, digits = 2)
+
+
+### SSP 5_8.5
+bio5.8 <- raster("wc_585_2100/band5.tif")
+bio6.8 <- raster("wc_585_2100/band6.tif")
+wat5.8 <- raster("RCP85.2100.Surface.Temperature.Max.BOv2_1.asc/2100AOGCM.RCP85.Surface.Temperature.Max.asc.BOv2_1.asc") #données marines de Bio-ORACLE
+wat6.8 <- raster("RCP85.2100.Surface.Temperature.Min.BOv2_1.asc/2100AOGCM.RCP85.Surface.Temperature.Min.asc.BOv2_1.asc")
+wat5.8 <- round(wat5.8, digits = 2)
+wat6.8 <- round(wat6.8, digits = 2)
+
+MinMaxNewRed <- import("Data/MinMaxNewRed.csv")
+
+CountNew <- as.data.frame(NULL)
+
+h0 <- Sys.time()
+for (i in 1:length(MinMaxNewRed$species)) {
+  
+  ### MAXs
+  if (is.na(MinMaxNewRed$max_exp[i])) {
+    max.i.t.0 <- NA; max.i.e.0 <- NA; max.i.o.0 <- NA; max.i.d.0 <- NA
+    max.i.t.2 <- NA; max.i.e.2 <- NA; max.i.o.2 <- NA; max.i.d.2 <- NA
+    max.i.t.8 <- NA; max.i.e.8 <- NA; max.i.o.8 <- NA; max.i.d.8 <- NA
+    
+    max.g.t.0 <- NA; max.g.e.0 <- NA; max.g.o.0 <- NA; max.g.d.0 <- NA
+    max.g.t.2 <- NA; max.g.e.2 <- NA; max.g.o.2 <- NA; max.g.d.2 <- NA
+    max.g.t.8 <- NA; max.g.e.8 <- NA; max.g.o.8 <- NA; max.g.d.8 <- NA
+    
+  } else {
+    
+    ### on choisit si l'espèce est terrestre, marine, ou seulement freshwater
+    if (MinMaxNewRed$terrestial[i]=="true") {
+      act5 <- bio5.0
+      f2.5 <- bio5.2
+      f8.5 <- bio5.8
+      
+    } else if (MinMaxNewRed$marine[i]=="true") {
+      act5 <- wat5.0
+      f2.5 <- wat5.2
+      f8.5 <- wat5.8
+      
+    } else {
+      act5 <- bio5.0
+      f2.5 <- bio5.2
+      f8.5 <- bio5.8
+    }
+    
+    ### IUCN
+    sp.iucn <- IUCN[IUCN$binomial == MinMaxNewRed$species[i],]
+    
+    crop <- crop(act5, sp.iucn)
+    grd <- rasterize(sp.iucn[,1], crop, 1, background=0, fun="last")
+    Occ.iucn <- as.data.frame(grd, xy=T)
+    Occ.iucn <- Occ.iucn[which(Occ.iucn[,3]!=0),]
+    
+    max.i.0 <- as.data.frame(extract(act5, Occ.iucn[,1:2])) ## Toutes les cells actuelles
+    max.i.0 <- na.omit(max.i.0)
+    max.i.2 <- as.data.frame(extract(f2.5, Occ.iucn[,1:2])) ## Toutes les cells ssp 2.6
+    max.i.2 <- na.omit(max.i.2)
+    max.i.8 <- as.data.frame(extract(f8.5, Occ.iucn[,1:2])) ## Toutes les cells ssp 8.5
+    max.i.8 <- na.omit(max.i.8)
+    
+    ## Count
+    max.i.t.0 <- count(max.i.0); max.i.t.0 <- max.i.t.0[1,1]
+    sub <- as.data.frame(which(max.i.0[,1] <= MinMaxNewRed$max_exp[i]))
+    max.i.e.0 <- count(sub); max.i.e.0 <- max.i.e.0[1,1]
+    sub <- as.data.frame(which(max.i.0[,1] <= MinMaxNewRed$max_iucn[i]))
+    max.i.o.0 <- count(sub); max.i.o.0 <- max.i.o.0[1,1]
+    max.i.d.0 <- max.i.e.0 - max.i.o.0
+    
+    max.i.t.2 <- count(max.i.2); max.i.t.2 <- max.i.t.2[1,1]
+    sub <- as.data.frame(which(max.i.2[,1] <= MinMaxNewRed$max_exp[i]))
+    max.i.e.2 <- count(sub); max.i.e.2 <- max.i.e.2[1,1]
+    sub <- as.data.frame(which(max.i.2[,1] <= MinMaxNewRed$max_iucn[i]))
+    max.i.o.2 <- count(sub); max.i.o.2 <- max.i.o.2[1,1]
+    max.i.d.2 <- max.i.e.2 - max.i.o.2
+    
+    max.i.t.8 <- count(max.i.8); max.i.t.8 <- max.i.t.8[1,1]
+    sub <- as.data.frame(which(max.i.8[,1] <= MinMaxNewRed$max_exp[i]))
+    max.i.e.8 <- count(sub); max.i.e.8 <- max.i.e.8[1,1]
+    sub <- as.data.frame(which(max.i.8[,1] <= MinMaxNewRed$max_iucn[i]))
+    max.i.o.8 <- count(sub); max.i.o.8 <- max.i.o.8[1,1]
+    max.i.d.8 <- max.i.e.8 - max.i.o.8
+    
+    ### GBIF
+    sp <- MinMaxNewRed$species[i]
+    SpSub <- subset(GBIF, species == sp)
+    x <- SpSub$decimallongitude
+    y <- SpSub$decimallatitude
+    Occ.gbif <- as.data.frame(cbind(x,y))
+    
+    max.g.0 <- as.data.frame(extract(act5, Occ.gbif[,1:2], cellnumbers=T))
+    max.g.0 <- dplyr::distinct(max.g.0) # pour avoir une seule fois chaque cell, évite d'avoir des replicas de certaines cells
+    max.g.0 <- na.omit(max.g.0)
+    
+    max.g.2 <- as.data.frame(extract(f2.5, Occ.gbif[,1:2], cellnumbers=T))
+    max.g.2 <- dplyr::distinct(max.g.2)
+    max.g.2 <- na.omit(max.g.2)
+    
+    max.g.8 <- as.data.frame(extract(f8.5, Occ.gbif[,1:2], cellnumbers=T))
+    max.g.8 <- dplyr::distinct(max.g.8)
+    max.g.8 <- na.omit(max.g.8)
+    
+    ## Count
+    max.g.t.0 <- count(max.g.0); max.g.t.0 <- max.g.t.0[1,1]
+    sub <- as.data.frame(which(max.g.0[,2] <= MinMaxNewRed$max_exp[i]))
+    max.g.e.0 <- count(sub); max.g.e.0 <- max.g.e.0[1,1]
+    sub <- as.data.frame(which(max.g.0[,2] <= MinMaxNewRed$max_gbif[i]))
+    max.g.o.0 <- count(sub); max.g.o.0 <- max.g.o.0[1,1]
+    max.g.d.0 <- max.g.e.0 - max.g.o.0
+    
+    max.g.t.2 <- count(max.g.2); max.g.t.2 <- max.g.t.2[1,1]
+    sub <- as.data.frame(which(max.g.2[,2] <= MinMaxNewRed$max_exp[i]))
+    max.g.e.2 <- count(sub); max.g.e.2 <- max.g.e.2[1,1]
+    sub <- as.data.frame(which(max.g.2[,2] <= MinMaxNewRed$max_gbif[i]))
+    max.g.o.2 <- count(sub); max.g.o.2 <- max.g.o.2[1,1]
+    max.g.d.2 <- max.g.e.2 - max.g.o.2
+    
+    max.g.t.8 <- count(max.g.8); max.g.t.8 <- max.g.t.8[1,1]
+    sub <- as.data.frame(which(max.g.8[,2] <= MinMaxNewRed$max_exp[i]))
+    max.g.e.8 <- count(sub); max.g.e.8 <- max.g.e.8[1,1]
+    sub <- as.data.frame(which(max.g.8[,2] <= MinMaxNewRed$max_gbif[i]))
+    max.g.o.8 <- count(sub); max.g.o.8 <- max.g.o.8[1,1]
+    max.g.d.8 <- max.g.e.8 - max.g.o.8
+  }
+  
+  
+  
+  ### MINs
+  if (is.na(MinMaxNewRed$min_exp[i])) {
+    min.i.t.0 <- NA; min.i.e.0 <- NA; min.i.o.0 <- NA; min.i.d.0 <- NA
+    min.i.t.2 <- NA; min.i.e.2 <- NA; min.i.o.2 <- NA; min.i.d.2 <- NA
+    min.i.t.8 <- NA; min.i.e.8 <- NA; min.i.o.8 <- NA; min.i.d.8 <- NA
+    
+    min.g.t.0 <- NA; min.g.e.0 <- NA; min.g.o.0 <- NA; min.g.d.0 <- NA
+    min.g.t.2 <- NA; min.g.e.2 <- NA; min.g.o.2 <- NA; min.g.d.2 <- NA
+    min.g.t.8 <- NA; min.g.e.8 <- NA; min.g.o.8 <- NA; min.g.d.8 <- NA
+    
+  } else {
+    
+    ### on choisit si l'espèce est terrestre, marine, ou seulement freshwater
+    if (MinMaxNewRed$terrestial[i]=="true") {
+      act6 <- bio6.0
+      f2.6 <- bio6.2
+      f8.6 <- bio6.8
+      
+    } else if (MinMaxNewRed$marine[i]=="true") {
+      act6 <- wat6.0
+      f2.6 <- wat6.2
+      f8.6 <- wat6.8
+      
+    } else {
+      act6 <- bio6.0
+      f2.6 <- bio6.2
+      f8.6 <- bio6.8
+    }
+    
+    ### IUCN
+    sp.iucn <- IUCN[IUCN$binomial == MinMaxNewRed$species[i],]
+    
+    crop <- crop(act6, sp.iucn)
+    grd <- rasterize(sp.iucn[,1], crop, 1, background=0, fun="last")
+    Occ.iucn <- as.data.frame(grd, xy=T)
+    Occ.iucn <- Occ.iucn[which(Occ.iucn[,3]!=0),]
+    
+    min.i.0 <- as.data.frame(extract(act6, Occ.iucn[,1:2])) ## Toutes les cells actuelles
+    min.i.0 <- na.omit(min.i.0)
+    min.i.2 <- as.data.frame(extract(f2.6, Occ.iucn[,1:2])) ## Toutes les cells ssp 2.6
+    min.i.2 <- na.omit(min.i.2)    
+    min.i.8 <- as.data.frame(extract(f8.6, Occ.iucn[,1:2])) ## Toutes les cells ssp 8.5
+    min.i.8 <- na.omit(min.i.8)
+    
+    ## Count
+    min.i.t.0 <- count(min.i.0); min.i.t.0 <- min.i.t.0[1,1]
+    sub <- as.data.frame(which(min.i.0[,1] >= MinMaxNewRed$min_exp[i]))
+    min.i.e.0 <- count(sub); min.i.e.0 <- min.i.e.0[1,1]
+    sub <- as.data.frame(which(min.i.0[,1] >= MinMaxNewRed$min_iucn[i]))
+    min.i.o.0 <- count(sub); min.i.o.0 <- min.i.o.0[1,1]
+    min.i.d.0 <- min.i.e.0 - min.i.o.0
+    
+    min.i.t.2 <- count(min.i.2); min.i.t.2 <- min.i.t.2[1,1]
+    sub <- as.data.frame(which(min.i.2[,1] >= MinMaxNewRed$min_exp[i]))
+    min.i.e.2 <- count(sub); min.i.e.2 <- min.i.e.2[1,1]
+    sub <- as.data.frame(which(min.i.2[,1] >= MinMaxNewRed$min_iucn[i]))
+    min.i.o.2 <- count(sub); min.i.o.2 <- min.i.o.2[1,1]
+    min.i.d.2 <- min.i.e.2 - min.i.o.2
+    
+    min.i.t.8 <- count(min.i.8); min.i.t.8 <- min.i.t.8[1,1]
+    sub <- as.data.frame(which(min.i.8[,1] >= MinMaxNewRed$min_exp[i]))
+    min.i.e.8 <- count(sub); min.i.e.8 <- min.i.e.8[1,1]
+    sub <- as.data.frame(which(min.i.8[,1] >= MinMaxNewRed$min_iucn[i]))
+    min.i.o.8 <- count(sub); min.i.o.8 <- min.i.o.8[1,1]
+    min.i.d.8 <- min.i.e.8 - min.i.o.8
+    
+    ### GBIF
+    sp <- MinMaxNewRed$species[i]
+    SpSub <- subset(GBIF, species == sp)
+    x <- SpSub$decimallongitude
+    y <- SpSub$decimallatitude
+    Occ.gbif <- as.data.frame(cbind(x,y))
+    
+    min.g.0 <- as.data.frame(extract(act6, Occ.gbif[,1:2], cellnumbers=T))
+    min.g.0 <- dplyr::distinct(min.g.0) # pour avoir une seule fois chaque cell, évite d'avoir des replicas de certaines cells
+    min.g.0 <- na.omit(min.g.0)
+    
+    min.g.2 <- as.data.frame(extract(f2.6, Occ.gbif[,1:2], cellnumbers=T))
+    min.g.2 <- dplyr::distinct(min.g.2)
+    min.g.2 <- na.omit(min.g.2)
+    
+    min.g.8 <- as.data.frame(extract(f8.6, Occ.gbif[,1:2], cellnumbers=T))
+    min.g.8 <- dplyr::distinct(min.g.8)
+    min.g.8 <- na.omit(min.g.8)
+    
+    ## Count
+    min.g.t.0 <- count(min.g.0); min.g.t.0 <- min.g.t.0[1,1]
+    sub <- as.data.frame(which(min.g.0[,2] >= MinMaxNewRed$min_exp[i]))
+    min.g.e.0 <- count(sub); min.g.e.0 <- min.g.e.0[1,1]
+    sub <- as.data.frame(which(min.g.0[,2] >= MinMaxNewRed$min_gbif[i]))
+    min.g.o.0 <- count(sub); min.g.o.0 <- min.g.o.0[1,1]
+    min.g.d.0 <- min.g.e.0 - min.g.o.0
+    
+    min.g.t.2 <- count(min.g.2); min.g.t.2 <- min.g.t.2[1,1]
+    sub <- as.data.frame(which(min.g.2[,2] >= MinMaxNewRed$min_exp[i]))
+    min.g.e.2 <- count(sub); min.g.e.2 <- min.g.e.2[1,1]
+    sub <- as.data.frame(which(min.g.2[,2] >= MinMaxNewRed$min_gbif[i]))
+    min.g.o.2 <- count(sub); min.g.o.2 <- min.g.o.2[1,1]
+    min.g.d.2 <- min.g.e.2 - min.g.o.2
+    
+    min.g.t.8 <- count(min.g.8); min.g.t.8 <- min.g.t.8[1,1]
+    sub <- as.data.frame(which(min.g.8[,2] >= MinMaxNewRed$min_exp[i]))
+    min.g.e.8 <- count(sub); min.g.e.8 <- min.g.e.8[1,1]
+    sub <- as.data.frame(which(min.g.8[,2] >= MinMaxNewRed$min_gbif[i]))
+    min.g.o.8 <- count(sub); min.g.o.8 <- min.g.o.8[1,1]
+    min.g.d.8 <- min.g.e.8 - min.g.o.8
+  }
+  
+  ### Fin de boucle
+  tmp <- as.data.frame(cbind(MinMaxNewRed[i,c(2:13,20)]))
+  temp <- as.data.frame(cbind(tmp,
+                
+                max.i.t.0, max.i.e.0, max.i.o.0, max.i.d.0,
+                max.i.t.2, max.i.e.2, max.i.o.2, max.i.d.2,
+                max.i.t.8, max.i.e.8, max.i.o.8, max.i.d.8,
+                max.g.t.0, max.g.e.0, max.g.o.0, max.g.d.0,
+                max.g.t.2, max.g.e.2, max.g.o.2, max.g.d.2,
+                max.g.t.8, max.g.e.8, max.g.o.8, max.g.d.8,
+                
+                min.i.t.0, min.i.e.0, min.i.o.0, min.i.d.0,
+                min.i.t.2, min.i.e.2, min.i.o.2, min.i.d.2,
+                min.i.t.8, min.i.e.8, min.i.o.8, min.i.d.8,
+                min.g.t.0, min.g.e.0, min.g.o.0, min.g.d.0,
+                min.g.t.2, min.g.e.2, min.g.o.2, min.g.d.2,
+                min.g.t.8, min.g.e.8, min.g.o.8, min.g.d.8))
+  
+  CountNew <- rbind(CountNew, temp)
+  
+  print(paste0("Process: ", i/length(MinMaxNewRed$species)*100, "%"))
+  
+}; print(paste0("Heure de début: ", h0)); print(paste0("Heure de fin: ", Sys.time()))
+
+
+write.csv(CountNew, "Data/CountNew.csv")
+
+
+
+
+
+
+
+#### NEW PROPORTION ####
+
+CountNew <- import("Data/CountNew.csv")
+
+prop0 <- data.frame(x1=1:597)
+prop0$projection <- "Actual"
+prop0 <- cbind(prop0, CountNew[,2:14])
+
+prop0$max.obs.iucn <- CountNew$max.i.o.0/CountNew$max.i.t.0
+prop0$max.exp.iucn <- CountNew$max.i.e.0/CountNew$max.i.t.0
+prop0$max.int.iucn <- CountNew$max.i.d.0/CountNew$max.i.t.0
+
+prop0$max.obs.gbif <- CountNew$max.g.o.0/CountNew$max.g.t.0
+prop0$max.exp.gbif <- CountNew$max.g.e.0/CountNew$max.g.t.0
+prop0$max.int.gbif <- CountNew$max.g.d.0/CountNew$max.g.t.0
+
+prop0$min.obs.iucn <- CountNew$min.i.o.0/CountNew$min.i.t.0
+prop0$min.exp.iucn <- CountNew$min.i.e.0/CountNew$min.i.t.0
+prop0$min.int.iucn <- CountNew$min.i.d.0/CountNew$min.i.t.0
+
+prop0$min.obs.gbif <- CountNew$min.g.o.0/CountNew$min.g.t.0
+prop0$min.exp.gbif <- CountNew$min.g.e.0/CountNew$min.g.t.0
+prop0$min.int.gbif <- CountNew$min.g.d.0/CountNew$min.g.t.0
+
+
+prop2 <- data.frame(x1=1:597)
+prop2$projection <- "SSP 1_2.6"
+prop2 <- cbind(prop2, CountNew[,2:14])
+
+prop2$max.obs.iucn <- CountNew$max.i.o.2/CountNew$max.i.t.2
+prop2$max.exp.iucn <- CountNew$max.i.e.2/CountNew$max.i.t.2
+prop2$max.int.iucn <- CountNew$max.i.d.2/CountNew$max.i.t.2
+
+prop2$max.obs.gbif <- CountNew$max.g.o.2/CountNew$max.g.t.2
+prop2$max.exp.gbif <- CountNew$max.g.e.2/CountNew$max.g.t.2
+prop2$max.int.gbif <- CountNew$max.g.d.2/CountNew$max.g.t.2
+
+prop2$min.obs.iucn <- CountNew$min.i.o.2/CountNew$min.i.t.2
+prop2$min.exp.iucn <- CountNew$min.i.e.2/CountNew$min.i.t.2
+prop2$min.int.iucn <- CountNew$min.i.d.2/CountNew$min.i.t.2
+
+prop2$min.obs.gbif <- CountNew$min.g.o.2/CountNew$min.g.t.2
+prop2$min.exp.gbif <- CountNew$min.g.e.2/CountNew$min.g.t.2
+prop2$min.int.gbif <- CountNew$min.g.d.2/CountNew$min.g.t.2
+
+
+prop8 <- data.frame(x1=1:597)
+prop8$projection <- "SSP 5_8.5"
+prop8 <- cbind(prop8, CountNew[,2:14])
+
+prop8$max.obs.iucn <- CountNew$max.i.o.8/CountNew$max.i.t.8
+prop8$max.exp.iucn <- CountNew$max.i.e.8/CountNew$max.i.t.8
+prop8$max.int.iucn <- CountNew$max.i.d.8/CountNew$max.i.t.8
+
+prop8$max.obs.gbif <- CountNew$max.g.o.8/CountNew$max.g.t.8
+prop8$max.exp.gbif <- CountNew$max.g.e.8/CountNew$max.g.t.8
+prop8$max.int.gbif <- CountNew$max.g.d.8/CountNew$max.g.t.8
+
+prop8$min.obs.iucn <- CountNew$min.i.o.8/CountNew$min.i.t.8
+prop8$min.exp.iucn <- CountNew$min.i.e.8/CountNew$min.i.t.8
+prop8$min.int.iucn <- CountNew$min.i.d.8/CountNew$min.i.t.8
+
+prop8$min.obs.gbif <- CountNew$min.g.o.8/CountNew$min.g.t.8
+prop8$min.exp.gbif <- CountNew$min.g.e.8/CountNew$min.g.t.8
+prop8$min.int.gbif <- CountNew$min.g.d.8/CountNew$min.g.t.8
+
+
+PropNew <- dplyr::bind_rows(prop0, prop2, prop8)
+
+write.csv(PropNew, "Data/PropNew.csv")
+
+
+
+
+#### PLOTS? ####
+
+### max_gbif
+
+PropNewRed <- import("Data/PropNewRed.csv")
+PropNew <- import("Data/PropNew.csv")
+
+
+### Pas besoin de lancer
+df <- PropNew
+df$class <- as.factor(df$class)
+
+stat.test1 <- df %>%
+  group_by(class) %>%
+  kruskal_test(max.int.gbif ~ projection) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj"); stat.test1
+
+stat.test2 <- df %>%
+  group_by(class) %>%
+  dunn_test(max.int.gbif ~ projection); stat.test2
+
+### plots utiles
+p1 <- ggplot(PropNew)+
+  geom_boxplot(aes(class, max.obs.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=class, y=max.obs.gbif, group=projection, label = paste0("p = ", ..p.format..,"\n", ..p.signif..)), size=3.2, label.y=1.18, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=class, y=max.obs.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,0.25,0.5,0.75,1))+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of range sustainable\naccording to GBIF upper limits")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p1
+
+p2 <- ggplot(PropNew)+
+  geom_boxplot(aes(class, max.exp.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=class, y=max.exp.gbif, group=projection, label = paste0("p = ", ..p.format..,"\n", ..p.signif..)), size=3.2, label.y=1.18, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=class, y=max.exp.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,0.25,0.5,0.75,1))+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of range sustainable\naccording to Experimental upper limits")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p2
+
+p3 <- ggplot(PropNew)+
+  geom_boxplot(aes(class, max.int.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=class, y=max.int.gbif, group=projection, label = paste0("p = ", ..p.format..,"\n", ..p.signif..)), size=3.2, label.y=1.18, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=class, y=max.int.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of range betweenobserved and experimental GBIF upper limits")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p3
+
+ggarrange(ggarrange(p1,p2, labels=c("A","B"), nrow=2, legend=F), p3, labels=c("","C"),ncol=2, common.legend = T, legend="top")
+
+
+
+### Obsolèt
+
+p1 <- ggboxplot(PropNew, x="class", y="max.int.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental GBIF upper limits"); p1
+
+p2 <- ggboxplot(PropNew, x="class", y="max.obs.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to observed GBIF upper limit")+
+  theme(axis.text.x = element_blank()); p2
+
+p3 <- ggboxplot(PropNew, x="class", y="max.exp.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to experimental upper limit")+
+  theme(axis.text.x = element_blank()); p3
+
+figure3 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=1, nrow=3, common.legend = T, legend="right"); figure3
+
+
+
+p1 <- ggboxplot(PropNew, x="class", y="min.int.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental GBIF lower limits"); p1
+
+p2 <- ggboxplot(PropNew, x="class", y="min.obs.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to observed GBIF lower limit")+
+  theme(axis.text.x = element_blank()); p2
+
+p3 <- ggboxplot(PropNew, x="class", y="min.exp.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to experimental lower limit")+
+  theme(axis.text.x = element_blank()); p3
+
+figure3 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=1, nrow=3, common.legend = T, legend="right"); figure3
+
+
+
+
+
+### max IUCN
+
+p1 <- ggplot(PropNew, aes(x=projection, y=max.int.iucn, fill=projection))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ class)+
+  xlab(NULL)+
+  ylab("proportion between observed and experimental IUCN upper limits")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p1
+
+p2 <- ggplot(PropNew, aes(x=projection, y=max.exp.iucn, fill=projection))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ class)+
+  xlab(NULL)+
+  ylab("sustainable proportion according to experimental IUCN upper limit")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p2
+
+p3 <- ggplot(PropNew, aes(x=projection, y=max.obs.iucn, fill=projection))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ class)+
+  xlab(NULL)+
+  ylab("sustainable proportion according to observed IUCN upper limit")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p3
+
+figure4 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=3, nrow=1, common.legend = T, legend="right"); figure4
+
+
+
+p1 <- ggboxplot(PropNew, x="class", y="max.int.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental IUCN upper limits"); p1
+
+p2 <- ggboxplot(PropNew, x="class", y="max.obs.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to observed IUCN upper limit")+
+  theme(axis.text.x = element_blank()); p2
+
+p3 <- ggboxplot(PropNew, x="class", y="max.exp.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to experimental upper limit")+
+  theme(axis.text.x = element_blank()); p3
+
+figure3 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=1, nrow=3, common.legend = T, legend="right"); figure3
+
+
+
+p1 <- ggboxplot(PropNew, x="class", y="min.int.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental IUCN lower limits"); p1
+
+p2 <- ggboxplot(PropNew, x="class", y="min.obs.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to observed IUCN lower limit")+
+  theme(axis.text.x = element_blank()); p2
+
+p3 <- ggboxplot(PropNew, x="class", y="min.exp.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to experimental lower limit")+
+  theme(axis.text.x = element_blank()); p3
+
+figure3 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=1, nrow=3, common.legend = T, legend="right"); figure3
+
+
+
+
+### entre metrics
+
+p1 <- ggplot(PropNewRed, aes(x=max.metrics, y=max.int.iucn, fill=max.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ projection)+
+  xlab(NULL)+
+  ylab("proportion between observed and experimental IUCN upper limits")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p1
+
+p2 <- ggplot(PropNewRed, aes(x=max.metrics, y=max.int.gbif, fill=max.metrics))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ projection)+
+  xlab(NULL)+
+  ylab("proportion between observed and experimental GBIF upper limits")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p2
+
+figure4 <- ggarrange(p1, p2, labels=c("A", "B"), ncol=2, nrow=1, common.legend = T, legend="right"); figure4
+
+
+
+p1 <- ggboxplot(PropNew, x="projection", y="max.int.iucn", fill="max.metrics", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Metrics")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental IUCN upper limits"); p1
+
+p2 <- ggboxplot(PropNew, x="projection", y="max.int.gbif", fill="max.metrics", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Metrics")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental GBIF upper limits"); p2
+
+figure4 <- ggarrange(p1, p2, labels=c("A", "B"), ncol=2, nrow=1, common.legend = T, legend="right"); figure4
+
+
+
+
+p1 <- ggboxplot(PropNew, x="projection", y="min.int.iucn", fill="min.metrics", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Metrics")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental IUCN lower limits"); p1
+
+p2 <- ggboxplot(PropNew, x="projection", y="min.int.gbif", fill="min.metrics", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Metrics")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental GBIF lower limits"); p2
+
+figure4 <- ggarrange(p1, p2, labels=c("A", "B"), ncol=2, nrow=1, common.legend = T, legend="right"); figure4
+
+
+
+
+#### MINMAX adapted resolutions ####
+
+bio5 <- clim[[5]] / 10 # résolution 2.5'
+bio6 <- clim[[6]] / 10
+
+wat5 <- raster("Present.Surface.Temperature.Max.BOv2_1.asc/Present.Surface.Temperature.Max.asc") #données marines de Bio-ORACLE
+wat6 <- raster("Present.Surface.Temperature.Min.BOv2_1.asc/Present.Surface.Temperature.Min.asc")
+
+bio7 <- aggregate(bio5, fact=24)  # résolution 60'
+bio8 <- aggregate(bio6, fact=24)
+
+wat7 <- aggregate(wat5, fact=12) # résolution 60'
+wat8 <- aggregate(wat6, fact=12)
+
+
+### liste des espèces à prendre en compte + résumer tous les polygone iucn d'une même espèce en 1 seul layer
+
+sp.names <- as.data.frame(NULL)
+
+for (i in 1:length(IUCN$binomial)) {
+  species <- c(paste0(IUCN$binomial[i]))
+  if (length(which((sp.names$species == paste0(species))==T))>0) {
+  } else { 
+    marine <- IUCN$marine[i]
+    terrestial <- IUCN$terrestial[i]
+    freshwater <- IUCN$freshwater[i]
+    kingdom <- IUCN$kingdom[i]
+    phylum <- IUCN$phylum[i]
+    class <- IUCN$class[i]
+    order <- IUCN$order_[i]
+    family <- IUCN$family[i]
+    genus <- IUCN$genus[i]
+    j <- which(Exp.dataGT$species == species)
+    max.metrics <- Exp.dataGT$max_metric[j]
+    min.metrics <- Exp.dataGT$min_metric[j]
+    sp <- as.data.frame(cbind(species, kingdom, phylum, class, order, family, genus, marine, terrestial, freshwater, max.metrics, min.metrics))
+    sp.names <- rbind(sp.names, sp)
+  }
+}
+
+
+### Fonction pour toutes les espèces
+
+MinMaxAda <- as.data.frame(NULL)
+temp <- as.data.frame(NULL)
+
+h0 <- Sys.time()
+for (i in 1:length(sp.names$species)) {
+  
+  ### on choisit si l'espèce est terrestre, marine, ou seulement freshwater
+  if (sp.names$terrestial[i]=="true") {
+    iu5 <- bio7
+    iu6 <- bio8
+    gb5 <- bio5
+    gb6 <- bio6
+  } else if (sp.names$marine[i]=="true") {
+    iu5 <- wat7
+    iu6 <- wat8
+    gb5 <- wat5
+    gb6 <- wat6
+  } else {
+    iu5 <- bio7
+    iu6 <- bio8
+    gb5 <- bio5
+    gb6 <- bio6
+  }
+  
+  ### IUCN
+  sp.iucn <- IUCN[IUCN$binomial == sp.names$species[i],]
+  
+  crop <- crop(iu5, sp.iucn)
+  grd <- rasterize(sp.iucn[,1], crop, 1, background=0, fun="last")
+  Occ.iucn <- as.data.frame(grd, xy=T)
+  Occ.iucn <- Occ.iucn[which(Occ.iucn[,3]!=0),]
+  
+  # max
+  max.iucn <- extract(iu5, Occ.iucn[,1:2])
+  max.iucn <- na.omit(max.iucn)
+  if (length(max.iucn) < 30) {
+    max_iucn <- as.numeric(NA)
+    min_iucn <- as.numeric(NA)
+  } else {
+    max_iucn <- as.numeric(max(max.iucn, na.rm=T))
+    
+    #min
+    min.iucn <- extract(iu6, Occ.iucn[,1:2])
+    min.iucn <- na.omit(min.iucn)
+    min_iucn <- as.numeric(min(min.iucn, na.rm=T))
+  }
+  
+  
+  
+  ### GBIF 
+  sp <- sp.names$species[i]
+  if (length(which((GBIF$species == sp)==T))>0) {
+    SpSub <- subset(GBIF, species == sp)
+    x <- SpSub$decimallongitude
+    y <- SpSub$decimallatitude
+    Occ.gbif <- as.data.frame(cbind(x,y))
+    
+    #max
+    max.gbif <- as.data.frame(extract(gb5, Occ.gbif[,1:2], cellnumbers=T))
+    max.gbif <- dplyr::distinct(max.gbif) # pour avoir une seule fois chaque cell, évite d'avoir des replicas de certaines cells
+    max.gbif <- na.omit(max.gbif)
+    if (length(max.gbif[,2]) < 30) {
+      max_gbif <- as.numeric(NA)
+      min_gbif <- as.numeric(NA)
+    } else {
+      max_gbif <- as.numeric(max(max.gbif[,2], na.rm=T))
+      
+      #min
+      min.gbif <- as.data.frame(extract(gb6, Occ.gbif[,1:2], cellnumbers=T))
+      min.gbif <- dplyr::distinct(min.gbif) # pour avoir une seule fois chaque cell, évite d'avoir des replicas de certaines cells
+      min.gbif <- na.omit(min.gbif)
+      min_gbif <- as.numeric(min(min.gbif[,2], na.rm=T))
+    }
+    
+    
+  } else {
+    min_gbif <- as.numeric(NA)
+    max_gbif <- as.numeric(NA)
+  }
+  
+  
+  ### EXPERIMENTAL
+  j <- which(Exp.dataGT$species== sp)
+  max_exp <- as.numeric(Exp.dataGT$Tmax[j])
+  min_exp <- as.numeric(Exp.dataGT$tmin[j])
+  
+  ### Finition de la boucle
+  temp <- as.data.frame(cbind(sp.names[i,], max_iucn, min_iucn, max_gbif, min_gbif, max_exp, min_exp))
+  MinMaxAda <- rbind(MinMaxAda, temp)
+  
+  print(paste0("Process: ", i/length(sp.names$species)*100, "%"))
+  
+}; print(paste0("Heure de début: ", h0)); print(paste0("Heure de fin: ", Sys.time()))
+
+write.csv(MinMaxAda, "Data/MinMaxAda.csv")
+
+#### Traitement du dataframe ####
+
+### Enlever les lignes où gbif/iucn manquant
+
+f <- which(is.na(MinMaxAda$max_iucn))
+f1 <- which(is.na(MinMaxAda$max_gbif))
+f2 <- which(MinMaxAda$min.metrics == "NA")
+f3 <- which(MinMaxAda$min.metrics == "SCP")
+
+MinMaxAdaRed <- MinMaxAda[-c(f,f1,f2,f3),]
+
+
+### ajouter colonne "freshwater only"
+
+MinMaxAdaRed$classBis <- NA
+for (i in 1:length(MinMaxAdaRed$species)) {
+  if (MinMaxAdaRed$terrestial[i] == "false") {
+    if (MinMaxAdaRed$marine[i] == "false") {
+      MinMaxAdaRed$classBis[i] <- paste0("freshwater ", MinMaxAdaRed$class[i])
+    } else {
+      MinMaxAdaRed$classBis[i] <- paste(MinMaxAdaRed$class[i])
+    }
+  } else {
+    MinMaxAdaRed$classBis[i] <- paste(MinMaxAdaRed$class[i])
+  }
+}
+
+
+write.csv(MinMaxAdaRed, "Data/MinMaxAdaRed.csv")
+
+
+
+### créer un df vertical avec iucn/gbif dans les memes colonnes
+
+MinMaxAdaRed <- import("Data/MinMaxAdaRed.csv")
+
+f <- which(is.na(MinMaxAdaRed$max_exp)==T)
+MinMaxAdaRed <- MinMaxAdaRed[-f,]
+
+tmp <- data.frame(x1=1:332)
+tmp$data.origin <- "IUCN"
+tmp <- cbind(tmp, MinMaxAdaRed[,2:8], MinMaxAdaRed[,20], MinMaxAdaRed[,12:13],
+             MinMaxAdaRed$max_iucn, MinMaxAdaRed$min_iucn)
+
+colnames(tmp) <- c("x1","data.origin", "species", "kingdom", "phylum", "class", "order", "family", "genus", "classBis", "max.metrics", "min.metrics",
+                   "max", "min")
+
+
+tmp1 <- data.frame(x1=1:332)
+tmp1$data.origin <- "GBIF"
+tmp1 <- cbind(tmp1, MinMaxAdaRed[,2:8], MinMaxAdaRed[,20], MinMaxAdaRed[,12:13],
+              MinMaxAdaRed$max_gbif, MinMaxAdaRed$min_gbif)
+
+colnames(tmp1) <- c("x1","data.origin", "species", "kingdom", "phylum", "class", "order", "family", "genus", "classBis", "max.metrics", "min.metrics",
+                    "max", "min")
+
+tmp2 <- data.frame(x1=1:332)
+tmp2$data.origin <- "GlobTherm"
+tmp2 <- cbind(tmp2, MinMaxAdaRed[,2:8], MinMaxAdaRed[,20], MinMaxAdaRed[,12:13],
+              MinMaxAdaRed$max_exp, MinMaxAdaRed$min_exp)
+
+colnames(tmp2) <- c("x1","data.origin", "species", "kingdom", "phylum", "class", "order", "family", "genus", "classBis", "max.metrics", "min.metrics",
+                    "max", "min")
+
+MinMaxAdaVer <- data.frame(x0=1:996)
+MinMaxAdaVer <- dplyr::bind_rows(tmp, tmp1, tmp2)
+
+write.csv(MinMaxAdaVer, "Data/MaxAdaVer.csv")
+
+
+
+#### Plots jolis? ####
+
+MinMaxNewRed <- import("Data/MinMaxNewRed.csv")
+MinMaxNewRed$min.metrics <- as.factor(MinMaxNewRed$min.metrics)
+MinMaxNewRed$max.metrics <- as.factor(MinMaxNewRed$max.metrics)
+MinMaxNewRed$onlyFreshwater <- as.factor(MinMaxNewRed$onlyFreshwater)
+
+p1 <- ggplot(MinMaxAdaRed, aes(max_iucn, max_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=max.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Upper observed thermal limit according to IUCN [°C]")+
+  ylab("Upper experimental thermal limit [°C]"); p1
+
+p2 <- ggplot(MinMaxAdaRed, aes(min_iucn, min_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=min.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Lower observed thermal limit according to IUCN [°C]")+
+  ylab("Lower experimental thermal limit [°C]"); p2
+
+
+p3 <- ggplot(MinMaxAdaRed, aes(max_gbif, max_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=max.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Upper observed thermal limit according to GBIF [°C]")+
+  ylab("Upper experimental thermal limit [°C]"); p3
+
+p4 <- ggplot(MinMaxAdaRed, aes(min_gbif, min_exp), na.rm=T)+
+  geom_point(aes(color=class, shape=min.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Lower observed thermal limit according to GBIF [°C]")+
+  ylab("Lower experimental thermal limit [°C]"); p4
+
+figure4 <- ggarrange(p1, p3, p2, p4, labels=c("A", "B", "C", "D"), ncol=2, nrow=2, common.legend = F, legend="right"); figure4
+
+
+
+
+
+MaxAdaVer <- import("Data/MaxAdaVer.csv")
+
+df <- MaxAdaVer
+df$class <- as.factor(df$class)
+
+stat.test <- df %>%
+  group_by(class) %>%
+  wilcox_test(max ~ data.origin, paired = T) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test
+
+stat.test2 <- stat.test %>%
+  add_xy_position(x="class", dodge=0.8)
+
+p3 <- ggplot(MaxAdaVer)+
+  geom_boxplot(aes(x=class, y=max, fill=data.origin))+
+  stat_pvalue_manual(stat.test2, label = "{p.adj}  {p.adj.signif}", y.position = c(50, 56, 53) , label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=class, y=max, group=data.origin),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = "Database")+
+  xlab(NULL)+
+  ylab("Upper observed thermal limits [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p3
+
+
+
+MinAdaVer <- import("Data/MinAdaVer.csv")
+
+df <- MinAdaVer
+df$class <- as.factor(df$class)
+
+stat.test <- df %>%
+  group_by(class) %>%
+  wilcox_test(min ~ data.origin, paired = T) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test
+
+stat.test3 <- stat.test %>%
+  add_xy_position(x="class", dodge=0.8)
+
+
+p4 <- ggplot(MinAdaVer)+
+  geom_boxplot(aes(x=class, y=min, fill=data.origin))+
+  stat_pvalue_manual(stat.test3, label = "{p.adj}  {p.adj.signif}", y.position = c(40, 54, 47), label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=class, y=min, group=data.origin),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = "Database")+
+  xlab(NULL)+
+  ylab("Lower observed thermal limits [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p4
+
+ggarrange(p1, p3, labels=c("Res 0","Res 1"), ncol=1, nrow=2, label.x = 0, common.legend = T, legend="top")
+ggarrange(p2, p4, labels=c("Res 0", "Res 1"), ncol=1, nrow=2, label.x = 0, common.legend = T, legend="top")
+
+
+
+#### adapted resolution COUNT ####
+
+### Présent
+bio5.0 <- clim[[5]] / 10
+bio6.0 <- clim[[6]] / 10
+wat5.0 <- raster("Present.Surface.Temperature.Max.BOv2_1.asc/Present.Surface.Temperature.Max.asc") #données marines de Bio-ORACLE
+wat6.0 <- raster("Present.Surface.Temperature.Min.BOv2_1.asc/Present.Surface.Temperature.Min.asc")
+
+bio7.0 <- aggregate(bio5.0, fact=24)
+bio8.0 <- aggregate(bio6.0, fact=24)
+wat7.0 <- aggregate(wat5.0, fact=12)
+wat8.0 <- aggregate(wat6.0, fact=12)
+
+
+### SSP. 1_2.6
+bio5.2 <- raster("wc_126_2100/band5.tif")
+bio6.2 <- raster("wc_126_2100/band6.tif")
+wat5.2 <- raster("RCP26.2100.Surface.Temperature.Max.BOv2_1.asc/2100AOGCM.RCP26.Surface.Temperature.Max.asc.BOv2_1.asc") #données marines de Bio-ORACLE
+wat6.2 <- raster("RCP26.2100.Surface.Temperature.Min.BOv2_1.asc/2100AOGCM.RCP26.Surface.Temperature.Min.asc.BOv2_1.asc")
+
+bio7.2 <- aggregate(bio5.2, fact=24)
+bio8.2 <- aggregate(bio6.2, fact=24)
+wat7.2 <- aggregate(wat5.2, fact=12)
+wat8.2 <- aggregate(wat6.2, fact=12)
+
+
+### SSP 5_8.5
+bio5.8 <- raster("wc_585_2100/band5.tif")
+bio6.8 <- raster("wc_585_2100/band6.tif")
+wat5.8 <- raster("RCP85.2100.Surface.Temperature.Max.BOv2_1.asc/2100AOGCM.RCP85.Surface.Temperature.Max.asc.BOv2_1.asc") #données marines de Bio-ORACLE
+wat6.8 <- raster("RCP85.2100.Surface.Temperature.Min.BOv2_1.asc/2100AOGCM.RCP85.Surface.Temperature.Min.asc.BOv2_1.asc")
+
+bio7.8 <- aggregate(bio5.8, fact=24)
+bio8.8 <- aggregate(bio6.8, fact=24)
+wat7.8 <- aggregate(wat5.8, fact=12)
+wat8.8 <- aggregate(wat6.8, fact=12)
+
+
+MinMaxNewRed <- import("Data/MinMaxAdaRed.csv")
+
+CountAda <- as.data.frame(NULL)
+
+h0 <- Sys.time()
+for (i in 1:length(MinMaxNewRed$species)) {
+  
+  ### MAXs
+  if (is.na(MinMaxNewRed$max_exp[i])) {
+    max.i.t.0 <- NA; max.i.e.0 <- NA; max.i.o.0 <- NA; max.i.d.0 <- NA
+    max.i.t.2 <- NA; max.i.e.2 <- NA; max.i.o.2 <- NA; max.i.d.2 <- NA
+    max.i.t.8 <- NA; max.i.e.8 <- NA; max.i.o.8 <- NA; max.i.d.8 <- NA
+    
+    max.g.t.0 <- NA; max.g.e.0 <- NA; max.g.o.0 <- NA; max.g.d.0 <- NA
+    max.g.t.2 <- NA; max.g.e.2 <- NA; max.g.o.2 <- NA; max.g.d.2 <- NA
+    max.g.t.8 <- NA; max.g.e.8 <- NA; max.g.o.8 <- NA; max.g.d.8 <- NA
+    
+  } else {
+    
+    ### on choisit si l'espèce est terrestre, marine, ou seulement freshwater
+    if (MinMaxNewRed$terrestial[i]=="true") {
+      act7 <- bio7.0
+      f2.7 <- bio7.2
+      f8.7 <- bio7.8
+      
+      act5 <- bio5.0
+      f2.5 <- bio5.2
+      f8.5 <- bio5.8
+      
+    } else if (MinMaxNewRed$marine[i]=="true") {
+      act7 <- wat7.0
+      f2.7 <- wat7.2
+      f8.7 <- wat7.8
+      
+      act5 <- wat5.0
+      f2.5 <- wat5.2
+      f8.5 <- wat5.8
+      
+    } else {
+      act7 <- bio7.0
+      f2.7 <- bio7.2
+      f8.7 <- bio7.8
+      
+      act5 <- bio5.0
+      f2.5 <- bio5.2
+      f8.5 <- bio5.8
+    }
+    
+    ### IUCN
+    sp.iucn <- IUCN[IUCN$binomial == MinMaxNewRed$species[i],]
+    
+    crop <- crop(act7, sp.iucn)
+    grd <- rasterize(sp.iucn[,1], crop, 1, background=0, fun="last")
+    Occ.iucn <- as.data.frame(grd, xy=T)
+    Occ.iucn <- Occ.iucn[which(Occ.iucn[,3]!=0),]
+    
+    max.i.0 <- as.data.frame(extract(act7, Occ.iucn[,1:2])) ## Toutes les cells actuelles
+    max.i.0 <- na.omit(max.i.0)
+    max.i.2 <- as.data.frame(extract(f2.7, Occ.iucn[,1:2])) ## Toutes les cells ssp 2.6
+    max.i.2 <- na.omit(max.i.2)
+    max.i.8 <- as.data.frame(extract(f8.7, Occ.iucn[,1:2])) ## Toutes les cells ssp 8.5
+    max.i.8 <- na.omit(max.i.8)
+    
+    ## Count
+    max.i.t.0 <- count(max.i.0); max.i.t.0 <- max.i.t.0[1,1]
+    sub <- as.data.frame(which(max.i.0[,1] <= MinMaxNewRed$max_exp[i]))
+    max.i.e.0 <- count(sub); max.i.e.0 <- max.i.e.0[1,1]
+    sub <- as.data.frame(which(max.i.0[,1] <= MinMaxNewRed$max_iucn[i]))
+    max.i.o.0 <- count(sub); max.i.o.0 <- max.i.o.0[1,1]
+    max.i.d.0 <- max.i.e.0 - max.i.o.0
+    
+    max.i.t.2 <- count(max.i.2); max.i.t.2 <- max.i.t.2[1,1]
+    sub <- as.data.frame(which(max.i.2[,1] <= MinMaxNewRed$max_exp[i]))
+    max.i.e.2 <- count(sub); max.i.e.2 <- max.i.e.2[1,1]
+    sub <- as.data.frame(which(max.i.2[,1] <= MinMaxNewRed$max_iucn[i]))
+    max.i.o.2 <- count(sub); max.i.o.2 <- max.i.o.2[1,1]
+    max.i.d.2 <- max.i.e.2 - max.i.o.2
+    
+    max.i.t.8 <- count(max.i.8); max.i.t.8 <- max.i.t.8[1,1]
+    sub <- as.data.frame(which(max.i.8[,1] <= MinMaxNewRed$max_exp[i]))
+    max.i.e.8 <- count(sub); max.i.e.8 <- max.i.e.8[1,1]
+    sub <- as.data.frame(which(max.i.8[,1] <= MinMaxNewRed$max_iucn[i]))
+    max.i.o.8 <- count(sub); max.i.o.8 <- max.i.o.8[1,1]
+    max.i.d.8 <- max.i.e.8 - max.i.o.8
+    
+    ### GBIF
+    sp <- MinMaxNewRed$species[i]
+    SpSub <- subset(GBIF, species == sp)
+    x <- SpSub$decimallongitude
+    y <- SpSub$decimallatitude
+    Occ.gbif <- as.data.frame(cbind(x,y))
+    
+    max.g.0 <- as.data.frame(extract(act5, Occ.gbif[,1:2], cellnumbers=T))
+    max.g.0 <- dplyr::distinct(max.g.0) # pour avoir une seule fois chaque cell, évite d'avoir des replicas de certaines cells
+    max.g.0 <- na.omit(max.g.0)
+    
+    max.g.2 <- as.data.frame(extract(f2.5, Occ.gbif[,1:2], cellnumbers=T))
+    max.g.2 <- dplyr::distinct(max.g.2)
+    max.g.2 <- na.omit(max.g.2)
+    
+    max.g.8 <- as.data.frame(extract(f8.5, Occ.gbif[,1:2], cellnumbers=T))
+    max.g.8 <- dplyr::distinct(max.g.8)
+    max.g.8 <- na.omit(max.g.8)
+    
+    ## Count
+    max.g.t.0 <- count(max.g.0); max.g.t.0 <- max.g.t.0[1,1]
+    sub <- as.data.frame(which(max.g.0[,2] <= MinMaxNewRed$max_exp[i]))
+    max.g.e.0 <- count(sub); max.g.e.0 <- max.g.e.0[1,1]
+    sub <- as.data.frame(which(max.g.0[,2] <= MinMaxNewRed$max_gbif[i]))
+    max.g.o.0 <- count(sub); max.g.o.0 <- max.g.o.0[1,1]
+    max.g.d.0 <- max.g.e.0 - max.g.o.0
+    
+    max.g.t.2 <- count(max.g.2); max.g.t.2 <- max.g.t.2[1,1]
+    sub <- as.data.frame(which(max.g.2[,2] <= MinMaxNewRed$max_exp[i]))
+    max.g.e.2 <- count(sub); max.g.e.2 <- max.g.e.2[1,1]
+    sub <- as.data.frame(which(max.g.2[,2] <= MinMaxNewRed$max_gbif[i]))
+    max.g.o.2 <- count(sub); max.g.o.2 <- max.g.o.2[1,1]
+    max.g.d.2 <- max.g.e.2 - max.g.o.2
+    
+    max.g.t.8 <- count(max.g.8); max.g.t.8 <- max.g.t.8[1,1]
+    sub <- as.data.frame(which(max.g.8[,2] <= MinMaxNewRed$max_exp[i]))
+    max.g.e.8 <- count(sub); max.g.e.8 <- max.g.e.8[1,1]
+    sub <- as.data.frame(which(max.g.8[,2] <= MinMaxNewRed$max_gbif[i]))
+    max.g.o.8 <- count(sub); max.g.o.8 <- max.g.o.8[1,1]
+    max.g.d.8 <- max.g.e.8 - max.g.o.8
+  }
+  
+  
+  
+  ### MINs
+  if (is.na(MinMaxNewRed$min_exp[i])) {
+    min.i.t.0 <- NA; min.i.e.0 <- NA; min.i.o.0 <- NA; min.i.d.0 <- NA
+    min.i.t.2 <- NA; min.i.e.2 <- NA; min.i.o.2 <- NA; min.i.d.2 <- NA
+    min.i.t.8 <- NA; min.i.e.8 <- NA; min.i.o.8 <- NA; min.i.d.8 <- NA
+    
+    min.g.t.0 <- NA; min.g.e.0 <- NA; min.g.o.0 <- NA; min.g.d.0 <- NA
+    min.g.t.2 <- NA; min.g.e.2 <- NA; min.g.o.2 <- NA; min.g.d.2 <- NA
+    min.g.t.8 <- NA; min.g.e.8 <- NA; min.g.o.8 <- NA; min.g.d.8 <- NA
+    
+  } else {
+    
+    ### on choisit si l'espèce est terrestre, marine, ou seulement freshwater
+    if (MinMaxNewRed$terrestial[i]=="true") {
+      act8 <- bio8.0
+      f2.8 <- bio8.2
+      f8.8 <- bio8.8
+      
+      act6 <- bio6.0
+      f2.6 <- bio6.2
+      f8.6 <- bio6.8
+      
+    } else if (MinMaxNewRed$marine[i]=="true") {
+      act8 <- wat8.0
+      f2.8 <- wat8.2
+      f8.8 <- wat8.8
+      
+      act6 <- wat6.0
+      f2.6 <- wat6.2
+      f8.6 <- wat6.8
+      
+    } else {
+      act8 <- bio8.0
+      f2.8 <- bio8.2
+      f8.8 <- bio8.8
+      
+      act6 <- bio6.0
+      f2.6 <- bio6.2
+      f8.6 <- bio6.8
+    }
+    
+    ### IUCN
+    sp.iucn <- IUCN[IUCN$binomial == MinMaxNewRed$species[i],]
+    
+    crop <- crop(act8, sp.iucn)
+    grd <- rasterize(sp.iucn[,1], crop, 1, background=0, fun="last")
+    Occ.iucn <- as.data.frame(grd, xy=T)
+    Occ.iucn <- Occ.iucn[which(Occ.iucn[,3]!=0),]
+    
+    min.i.0 <- as.data.frame(extract(act8, Occ.iucn[,1:2])) ## Toutes les cells actuelles
+    min.i.0 <- na.omit(min.i.0)
+    min.i.2 <- as.data.frame(extract(f2.8, Occ.iucn[,1:2])) ## Toutes les cells ssp 2.6
+    min.i.2 <- na.omit(min.i.2)    
+    min.i.8 <- as.data.frame(extract(f8.8, Occ.iucn[,1:2])) ## Toutes les cells ssp 8.5
+    min.i.8 <- na.omit(min.i.8)
+    
+    ## Count
+    min.i.t.0 <- count(min.i.0); min.i.t.0 <- min.i.t.0[1,1]
+    sub <- as.data.frame(which(min.i.0[,1] >= MinMaxNewRed$min_exp[i]))
+    min.i.e.0 <- count(sub); min.i.e.0 <- min.i.e.0[1,1]
+    sub <- as.data.frame(which(min.i.0[,1] >= MinMaxNewRed$min_iucn[i]))
+    min.i.o.0 <- count(sub); min.i.o.0 <- min.i.o.0[1,1]
+    min.i.d.0 <- min.i.e.0 - min.i.o.0
+    
+    min.i.t.2 <- count(min.i.2); min.i.t.2 <- min.i.t.2[1,1]
+    sub <- as.data.frame(which(min.i.2[,1] >= MinMaxNewRed$min_exp[i]))
+    min.i.e.2 <- count(sub); min.i.e.2 <- min.i.e.2[1,1]
+    sub <- as.data.frame(which(min.i.2[,1] >= MinMaxNewRed$min_iucn[i]))
+    min.i.o.2 <- count(sub); min.i.o.2 <- min.i.o.2[1,1]
+    min.i.d.2 <- min.i.e.2 - min.i.o.2
+    
+    min.i.t.8 <- count(min.i.8); min.i.t.8 <- min.i.t.8[1,1]
+    sub <- as.data.frame(which(min.i.8[,1] >= MinMaxNewRed$min_exp[i]))
+    min.i.e.8 <- count(sub); min.i.e.8 <- min.i.e.8[1,1]
+    sub <- as.data.frame(which(min.i.8[,1] >= MinMaxNewRed$min_iucn[i]))
+    min.i.o.8 <- count(sub); min.i.o.8 <- min.i.o.8[1,1]
+    min.i.d.8 <- min.i.e.8 - min.i.o.8
+    
+    ### GBIF
+    sp <- MinMaxNewRed$species[i]
+    SpSub <- subset(GBIF, species == sp)
+    x <- SpSub$decimallongitude
+    y <- SpSub$decimallatitude
+    Occ.gbif <- as.data.frame(cbind(x,y))
+    
+    min.g.0 <- as.data.frame(extract(act6, Occ.gbif[,1:2], cellnumbers=T))
+    min.g.0 <- dplyr::distinct(min.g.0) # pour avoir une seule fois chaque cell, évite d'avoir des replicas de certaines cells
+    min.g.0 <- na.omit(min.g.0)
+    
+    min.g.2 <- as.data.frame(extract(f2.6, Occ.gbif[,1:2], cellnumbers=T))
+    min.g.2 <- dplyr::distinct(min.g.2)
+    min.g.2 <- na.omit(min.g.2)
+    
+    min.g.8 <- as.data.frame(extract(f8.6, Occ.gbif[,1:2], cellnumbers=T))
+    min.g.8 <- dplyr::distinct(min.g.8)
+    min.g.8 <- na.omit(min.g.8)
+    
+    ## Count
+    min.g.t.0 <- count(min.g.0); min.g.t.0 <- min.g.t.0[1,1]
+    sub <- as.data.frame(which(min.g.0[,2] >= MinMaxNewRed$min_exp[i]))
+    min.g.e.0 <- count(sub); min.g.e.0 <- min.g.e.0[1,1]
+    sub <- as.data.frame(which(min.g.0[,2] >= MinMaxNewRed$min_gbif[i]))
+    min.g.o.0 <- count(sub); min.g.o.0 <- min.g.o.0[1,1]
+    min.g.d.0 <- min.g.e.0 - min.g.o.0
+    
+    min.g.t.2 <- count(min.g.2); min.g.t.2 <- min.g.t.2[1,1]
+    sub <- as.data.frame(which(min.g.2[,2] >= MinMaxNewRed$min_exp[i]))
+    min.g.e.2 <- count(sub); min.g.e.2 <- min.g.e.2[1,1]
+    sub <- as.data.frame(which(min.g.2[,2] >= MinMaxNewRed$min_gbif[i]))
+    min.g.o.2 <- count(sub); min.g.o.2 <- min.g.o.2[1,1]
+    min.g.d.2 <- min.g.e.2 - min.g.o.2
+    
+    min.g.t.8 <- count(min.g.8); min.g.t.8 <- min.g.t.8[1,1]
+    sub <- as.data.frame(which(min.g.8[,2] >= MinMaxNewRed$min_exp[i]))
+    min.g.e.8 <- count(sub); min.g.e.8 <- min.g.e.8[1,1]
+    sub <- as.data.frame(which(min.g.8[,2] >= MinMaxNewRed$min_gbif[i]))
+    min.g.o.8 <- count(sub); min.g.o.8 <- min.g.o.8[1,1]
+    min.g.d.8 <- min.g.e.8 - min.g.o.8
+  }
+  
+  ### Fin de boucle
+  tmp <- as.data.frame(cbind(MinMaxNewRed[i,2:13], MinMaxNewRed$classBis[i]))
+  temp <- as.data.frame(cbind(tmp,
+                              
+                              max.i.t.0, max.i.e.0, max.i.o.0, max.i.d.0,
+                              max.i.t.2, max.i.e.2, max.i.o.2, max.i.d.2,
+                              max.i.t.8, max.i.e.8, max.i.o.8, max.i.d.8,
+                              max.g.t.0, max.g.e.0, max.g.o.0, max.g.d.0,
+                              max.g.t.2, max.g.e.2, max.g.o.2, max.g.d.2,
+                              max.g.t.8, max.g.e.8, max.g.o.8, max.g.d.8,
+                              
+                              min.i.t.0, min.i.e.0, min.i.o.0, min.i.d.0,
+                              min.i.t.2, min.i.e.2, min.i.o.2, min.i.d.2,
+                              min.i.t.8, min.i.e.8, min.i.o.8, min.i.d.8,
+                              min.g.t.0, min.g.e.0, min.g.o.0, min.g.d.0,
+                              min.g.t.2, min.g.e.2, min.g.o.2, min.g.d.2,
+                              min.g.t.8, min.g.e.8, min.g.o.8, min.g.d.8))
+  
+  CountAda <- rbind(CountAda, temp)
+  
+  print(paste0("Process: ", i/length(MinMaxNewRed$species)*100, "%"))
+  
+}; print(paste0("Heure de début: ", h0)); print(paste0("Heure de fin: ", Sys.time()))
+
+
+write.csv(CountAda, "Data/CountAda.csv")
+
+
+
+
+
+
+
+#### adapted resolution PROPORTION ####
+
+CountNew <- import("Data/CountAda.csv")
+
+prop0 <- data.frame(x1=1:425)
+prop0$projection <- "Actual"
+prop0 <- cbind(prop0, CountNew[,2:14])
+
+prop0$max.obs.iucn <- CountNew$max.i.o.0/CountNew$max.i.t.0
+prop0$max.exp.iucn <- CountNew$max.i.e.0/CountNew$max.i.t.0
+prop0$max.int.iucn <- CountNew$max.i.d.0/CountNew$max.i.t.0
+
+prop0$max.obs.gbif <- CountNew$max.g.o.0/CountNew$max.g.t.0
+prop0$max.exp.gbif <- CountNew$max.g.e.0/CountNew$max.g.t.0
+prop0$max.int.gbif <- CountNew$max.g.d.0/CountNew$max.g.t.0
+
+prop0$min.obs.iucn <- CountNew$min.i.o.0/CountNew$min.i.t.0
+prop0$min.exp.iucn <- CountNew$min.i.e.0/CountNew$min.i.t.0
+prop0$min.int.iucn <- CountNew$min.i.d.0/CountNew$min.i.t.0
+
+prop0$min.obs.gbif <- CountNew$min.g.o.0/CountNew$min.g.t.0
+prop0$min.exp.gbif <- CountNew$min.g.e.0/CountNew$min.g.t.0
+prop0$min.int.gbif <- CountNew$min.g.d.0/CountNew$min.g.t.0
+
+
+prop2 <- data.frame(x1=1:425)
+prop2$projection <- "SSP 1_2.6"
+prop2 <- cbind(prop2, CountNew[,2:14])
+
+prop2$max.obs.iucn <- CountNew$max.i.o.2/CountNew$max.i.t.2
+prop2$max.exp.iucn <- CountNew$max.i.e.2/CountNew$max.i.t.2
+prop2$max.int.iucn <- CountNew$max.i.d.2/CountNew$max.i.t.2
+
+prop2$max.obs.gbif <- CountNew$max.g.o.2/CountNew$max.g.t.2
+prop2$max.exp.gbif <- CountNew$max.g.e.2/CountNew$max.g.t.2
+prop2$max.int.gbif <- CountNew$max.g.d.2/CountNew$max.g.t.2
+
+prop2$min.obs.iucn <- CountNew$min.i.o.2/CountNew$min.i.t.2
+prop2$min.exp.iucn <- CountNew$min.i.e.2/CountNew$min.i.t.2
+prop2$min.int.iucn <- CountNew$min.i.d.2/CountNew$min.i.t.2
+
+prop2$min.obs.gbif <- CountNew$min.g.o.2/CountNew$min.g.t.2
+prop2$min.exp.gbif <- CountNew$min.g.e.2/CountNew$min.g.t.2
+prop2$min.int.gbif <- CountNew$min.g.d.2/CountNew$min.g.t.2
+
+
+prop8 <- data.frame(x1=1:425)
+prop8$projection <- "SSP 5_8.5"
+prop8 <- cbind(prop8, CountNew[,2:14])
+
+prop8$max.obs.iucn <- CountNew$max.i.o.8/CountNew$max.i.t.8
+prop8$max.exp.iucn <- CountNew$max.i.e.8/CountNew$max.i.t.8
+prop8$max.int.iucn <- CountNew$max.i.d.8/CountNew$max.i.t.8
+
+prop8$max.obs.gbif <- CountNew$max.g.o.8/CountNew$max.g.t.8
+prop8$max.exp.gbif <- CountNew$max.g.e.8/CountNew$max.g.t.8
+prop8$max.int.gbif <- CountNew$max.g.d.8/CountNew$max.g.t.8
+
+prop8$min.obs.iucn <- CountNew$min.i.o.8/CountNew$min.i.t.8
+prop8$min.exp.iucn <- CountNew$min.i.e.8/CountNew$min.i.t.8
+prop8$min.int.iucn <- CountNew$min.i.d.8/CountNew$min.i.t.8
+
+prop8$min.obs.gbif <- CountNew$min.g.o.8/CountNew$min.g.t.8
+prop8$min.exp.gbif <- CountNew$min.g.e.8/CountNew$min.g.t.8
+prop8$min.int.gbif <- CountNew$min.g.d.8/CountNew$min.g.t.8
+
+
+PropAda <- dplyr::bind_rows(prop0, prop2, prop8)
+
+write.csv(PropAda, "Data/PropAda.csv")
+
+#### PLOTS? ####
+
+### max_gbif
+
+PropNewRed <- import("Data/PropNewRed.csv")
+PropNew <- import("Data/PropNew.csv")
+
+p1 <- ggplot(PropNew, aes(x=projection, y=max.int.gbif, fill=projection))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ class)+
+  xlab(NULL)+
+  ylab("proportion between observed and experimental GBIF upper limits")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p1
+
+p2 <- ggplot(PropNew, aes(x=projection, y=max.exp.gbif, fill=projection))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ class)+
+  xlab(NULL)+
+  ylab("sustainable proportion according to experimental upper limit")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p2
+
+p3 <- ggplot(PropNew, aes(x=projection, y=max.obs.gbif, fill=projection))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ class)+
+  xlab(NULL)+
+  ylab("sustainable proportion according to observed GBIF upper limit")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p3
+
+figure3 <- ggarrange(p3, p2, p1, labels=c("A", "B", "C"), ncol=3, nrow=1, common.legend = T, legend="right"); figure3
+
+
+
+p1 <- ggboxplot(PropNew, x="class", y="max.int.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental GBIF upper limits"); p1
+
+p2 <- ggboxplot(PropNew, x="class", y="max.obs.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to observed GBIF upper limit")+
+  theme(axis.text.x = element_blank()); p2
+
+p3 <- ggboxplot(PropNew, x="class", y="max.exp.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to experimental upper limit")+
+  theme(axis.text.x = element_blank()); p3
+
+figure3 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=1, nrow=3, common.legend = T, legend="right"); figure3
+
+
+
+p1 <- ggboxplot(PropNew, x="class", y="min.int.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental GBIF lower limits"); p1
+
+p2 <- ggboxplot(PropNew, x="class", y="min.obs.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to observed GBIF lower limit")+
+  theme(axis.text.x = element_blank()); p2
+
+p3 <- ggboxplot(PropNew, x="class", y="min.exp.gbif", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to experimental lower limit")+
+  theme(axis.text.x = element_blank()); p3
+
+figure3 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=1, nrow=3, common.legend = T, legend="right"); figure3
+
+
+
+
+
+### max IUCN
+
+p1 <- ggplot(PropNew, aes(x=projection, y=max.int.iucn, fill=projection))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ class)+
+  xlab(NULL)+
+  ylab("proportion between observed and experimental IUCN upper limits")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p1
+
+p2 <- ggplot(PropNew, aes(x=projection, y=max.exp.iucn, fill=projection))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ class)+
+  xlab(NULL)+
+  ylab("sustainable proportion according to experimental IUCN upper limit")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p2
+
+p3 <- ggplot(PropNew, aes(x=projection, y=max.obs.iucn, fill=projection))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ class)+
+  xlab(NULL)+
+  ylab("sustainable proportion according to observed IUCN upper limit")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p3
+
+figure4 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=3, nrow=1, common.legend = T, legend="right"); figure4
+
+
+
+p1 <- ggboxplot(PropNew, x="class", y="max.int.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental IUCN upper limits"); p1
+
+p2 <- ggboxplot(PropNew, x="class", y="max.obs.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to observed IUCN upper limit")+
+  theme(axis.text.x = element_blank()); p2
+
+p3 <- ggboxplot(PropNew, x="class", y="max.exp.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to experimental upper limit")+
+  theme(axis.text.x = element_blank()); p3
+
+figure3 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=1, nrow=3, common.legend = T, legend="right"); figure3
+
+
+
+p1 <- ggboxplot(PropNew, x="class", y="min.int.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental IUCN lower limits"); p1
+
+p2 <- ggboxplot(PropNew, x="class", y="min.obs.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to observed IUCN lower limit")+
+  theme(axis.text.x = element_blank()); p2
+
+p3 <- ggboxplot(PropNew, x="class", y="min.exp.iucn", fill="projection", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Projection")+
+  xlab(NULL)+
+  ylab("sustainable proportion of actual range\naccording to experimental lower limit")+
+  theme(axis.text.x = element_blank()); p3
+
+figure3 <- ggarrange(p2, p3, p1, labels=c("A", "B", "C"), ncol=1, nrow=3, common.legend = T, legend="right"); figure3
+
+
+
+
+### entre metrics
+
+p1 <- ggplot(PropNewRed, aes(x=max.metrics, y=max.int.iucn, fill=max.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ projection)+
+  xlab(NULL)+
+  ylab("proportion between observed and experimental IUCN upper limits")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p1
+
+p2 <- ggplot(PropNewRed, aes(x=max.metrics, y=max.int.gbif, fill=max.metrics))+
+  geom_boxplot(position=position_dodge(1))+
+  facet_wrap( ~ projection)+
+  xlab(NULL)+
+  ylab("proportion between observed and experimental GBIF upper limits")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)); p2
+
+figure4 <- ggarrange(p1, p2, labels=c("A", "B"), ncol=2, nrow=1, common.legend = T, legend="right"); figure4
+
+
+
+p1 <- ggboxplot(PropNew, x="projection", y="max.int.iucn", fill="max.metrics", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Metrics")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental IUCN upper limits"); p1
+
+p2 <- ggboxplot(PropNew, x="projection", y="max.int.gbif", fill="max.metrics", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Metrics")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental GBIF upper limits"); p2
+
+figure4 <- ggarrange(p1, p2, labels=c("A", "B"), ncol=2, nrow=1, common.legend = T, legend="right"); figure4
+
+
+
+
+p1 <- ggboxplot(PropNew, x="projection", y="min.int.iucn", fill="min.metrics", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Metrics")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental IUCN lower limits"); p1
+
+p2 <- ggboxplot(PropNew, x="projection", y="min.int.gbif", fill="min.metrics", na.mr=T, varwidth=F)+
+  theme_gray()+
+  labs(fill = "Metrics")+
+  xlab(NULL)+
+  ylab("proportion of actual range between\nobserved and experimental GBIF lower limits"); p2
+
+figure4 <- ggarrange(p1, p2, labels=c("A", "B"), ncol=2, nrow=1, common.legend = T, legend="right"); figure4
+
+
+
+
+
+#### Mise en commun IUCN 1° et 2.5' ####
+
+MinMaxNewRed <- import("Data/MinMaxNewRed.csv")
+MinMaxAdaRed <- import("Data/MinMaxAdaRed.csv")
+
+tmp <- dplyr::semi_join(MinMaxNewRed, MinMaxAdaRed, by = "species")
+
+
+MinMaxiucnRed <- as.data.frame(NULL)
+for (i in 1:length(tmp$species)) {
+  sp <- tmp$species[i]
+  j <- which(MinMaxNewRed$species==sp)
+  k <- which(MinMaxAdaRed$species==sp)
+  
+  temp <- cbind(MinMaxNewRed[j,2:8], MinMaxNewRed$classBis[j], MinMaxNewRed[j,12:13],
+                MinMaxNewRed$max_iucn[j], MinMaxNewRed$min_iucn[j], 
+                MinMaxAdaRed$max_iucn[k], MinMaxAdaRed$min_iucn[k], 
+                MinMaxNewRed$max_exp[j], MinMaxNewRed$min_exp[j])
+  MinMaxiucnRed <- rbind(MinMaxiucnRed, temp)
+}
+
+colnames(MinMaxiucnRed) <- c("species", "kingdom", "phylum", "class", "order", "family", "genus", "classBis", "max.metrics", "min.metrics", 
+                            "max.2.5", "min.2.5", "max.60", "min.60", "max_exp", "min_exp")
+
+write.csv(MinMaxiucnRed, "Data/MinMaxiucnRed.csv")
+
+### Mise en place d'un df vertcial
+
+MinMaxiucnRed <- import("Data/MinMaxiucnRed.csv")
+
+tmp <- data.frame(x1=1:425)
+tmp$resolution <- "2.5'"
+tmp <- cbind(tmp, MinMaxiucnRed[,2:11], MinMaxiucnRed$max.2.5, MinMaxiucnRed$min.2.5)
+
+colnames(tmp) <- c("x1", "resolution", "species", "kingdom", "phylum", "class", "order", "family", "genus", "classBis", "max.metrics", "min.metrics", 
+                             "max", "min")
+
+tmp1 <- data.frame(x1=1:425)
+tmp1$resolution <- "60'"
+tmp1 <- cbind(tmp1, MinMaxiucnRed[,2:11], MinMaxiucnRed$max.60, MinMaxiucnRed$min.60)
+
+colnames(tmp1) <- c("x1", "resolution", "species", "kingdom", "phylum", "class", "order", "family", "genus", "classBis", "max.metrics", "min.metrics", 
+                   "max", "min")
+
+MinMaxiucnVer <- data.frame(x0=1:850)
+MinMaxiucnVer <- dplyr::bind_rows(tmp, tmp1)
+
+write.csv(MinMaxiucnVer, "Data/MinMaxiucnVer.csv")
+
+#### plot comparatifs 1°, 2.5' ####
+
+MinMaxiucnRed <- import("Data/MinMaxiucnRed.csv")
+
+p1 <- ggplot(MinMaxiucnRed, aes(max.2.5, max_exp), na.rm=T)+
+  geom_point(aes(color=classBis, shape=max.metrics))+
+  scale_shape_discrete(name="Metrics", na.translate = F, labels=c("CT","LT100","LT50","TNZ"))+
+  scale_color_discrete(name="Classes", )+
+  geom_smooth(aes(color=classBis),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(10,50)+
+  ylim(10,50)+
+  xlab("RL upper bound [°C]")+
+  ylab("FL upper bound [°C]")+
+  theme(legend.title = element_text(face="bold")); p1
+
+p2 <- ggplot(MinMaxiucnRed, aes(max.60, max_exp), na.rm=T)+
+  geom_point(aes(color=classBis, shape=max.metrics))+
+  scale_shape_discrete(name="Metrics", na.translate = F, labels=c("CT","LT100","LT50","UTNZ"))+
+  scale_color_discrete(name="Classes", )+
+  geom_smooth(aes(color=classBis),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(10,50)+
+  ylim(10,50)+
+  xlab("RL upper bound [°C]")+
+  ylab("FL upper bound [°C]")+
+  theme(legend.title = element_text(face="bold")); p2
+
+p3 <- ggplot(MinMaxiucnRed, aes(min.2.5, min_exp), na.rm=T)+
+  geom_point(aes(color=classBis, shape=max.metrics))+
+  scale_shape_discrete(name="Metrics", na.translate = F, labels=c("CT","LT100","LT50","LTNZ"))+
+  scale_color_discrete(name="Classes", )+
+  geom_smooth(aes(color=classBis),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(-45,35)+
+  ylim(-45,35)+
+  xlab("RL lower bound [°C]")+
+  ylab("FL lower bound [°C]")+
+  theme(legend.title = element_text(face="bold")); p3
+
+p4 <- ggplot(MinMaxiucnRed, aes(min.60, min_exp), na.rm=T)+
+  geom_point(aes(color=classBis, shape=max.metrics))+
+  scale_shape_discrete(name="Metrics", na.translate = F, labels=c("CT","LT100","LT50","LTNZ"))+
+  scale_color_discrete(name="Classes", )+
+  geom_smooth(aes(color=classBis),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(-45,35)+
+  ylim(-45,35)+
+  xlab("RL lower bound [°C]")+
+  ylab("FL lower bound [°C]")+
+  theme(legend.title = element_text(face="bold")); p4
+
+ggarrange(p1,p2,p3,p4, labels=c("A", "B", "C", "D"), ncol=2, nrow=2, common.legend = T, legend="right")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+p1 <- ggplot(MinMaxiucnRed, aes(max.2.5, max.60), na.rm=T)+
+  geom_point(aes(color=class, shape=max.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Upper observed thermal at 2.5' resolution [°C]")+
+  ylab("Upper observed thermal at 60' resolution [°C]"); p1
+
+p2 <- ggplot(MinMaxiucnRed, aes(min.2.5, min.60), na.rm=T)+
+  geom_point(aes(color=class, shape=min.metrics))+
+  scale_shape_discrete(na.translate = F)+
+  geom_smooth(aes(color=class),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlab("Lower observed thermal at 2.5' resolution [°C]")+
+  ylab("Lower observed thermal at 60' resolution [°C]"); p2
+
+ggarrange(p1, p2, labels = c("MAX", "MIN"), nrow=2)
+
+
+
+
+
+MinMaxiucnVer <- import("Data/MinMaxiucnVer.csv")
+
+df <- MinMaxiucnVer
+df$class <- as.factor(df$class)
+
+stat.test <- df %>%
+  group_by(class) %>%
+  wilcox_test(max ~ resolution, paired = T) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test
+
+stat.test4 <- stat.test %>%
+  add_xy_position(x="class", dodge=0.8)
+
+p3 <- ggplot(MinMaxiucnVer)+
+  geom_boxplot(aes(x=class, y=max, fill=resolution))+
+  stat_pvalue_manual(stat.test4, label = "{p.adj}  {p.adj.signif}", y.position = c(50, 56, 53) , label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=class, y=max, group=resolution),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = "Resolution")+
+  xlab(NULL)+
+  ylab("Upper observed thermal limits [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p3
+
+
+stat.test <- df %>%
+  group_by(class) %>%
+  wilcox_test(min ~ resolution, paired = T) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+stat.test
+
+stat.test5 <- stat.test %>%
+  add_xy_position(x="class", dodge=0.8)
+
+
+p4 <- ggplot(MinMaxiucnVer)+
+  geom_boxplot(aes(x=class, y=min, fill=resolution))+
+  stat_pvalue_manual(stat.test5, label = "{p.adj}  {p.adj.signif}", y.position = c(40, 54, 47), label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=class, y=min, group=resolution),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = "Resolution")+
+  xlab(NULL)+
+  ylab("Lower observed thermal limits [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p4
+
+ggarrange(p3,p4, labels = c("MAX", "MIN"), nrow=2, common.legend = T, legend = "top")
+
+
+
+
+
+#### plot limits exp vs limits obs. ####
+
+MinMaxNewRed <- import("Data/MinMaxNewRed.csv")
+
+p1 <- ggplot(MinMaxNewRed, aes(max_iucn, max_exp), na.rm=T)+
+  geom_point(aes(color=classBis, shape=max.metrics))+
+  scale_shape_discrete(name="Metrics", na.translate = F, labels=c("CT","LT100","LT50","UTNZ"))+
+  scale_color_discrete(name="Classes", )+
+  geom_smooth(aes(color=classBis),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(10,50)+
+  ylim(10,50)+
+  xlab("Observed upper thermal limits [°C]")+
+  ylab("Physiological upper thermal limits [°C]")+
+  theme(legend.title = element_text(face="bold")); p1
+
+p1bis <- ggplot(MinMaxNewRed, aes(max_iucn, max_exp), na.rm=T)+
+  geom_point(aes(color=classBis, shape=max.metrics))+
+  scale_shape_discrete(name="Metrics", na.translate = F, labels=c("CT","LT100","LT50","TNZ"))+
+  scale_color_discrete(name="Classes", )+
+  geom_smooth(aes(color=classBis),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(10,50)+
+  ylim(10,50)+
+  xlab("RL upper bound [°C]")+
+  ylab("FL upper bound [°C]")+
+  theme(legend.title = element_text(face="bold")); p1bis
+
+p3 <- ggplot(MinMaxNewRed, aes(max_gbif, max_exp), na.rm=T)+
+  geom_point(aes(color=classBis, shape=max.metrics))+
+  scale_shape_discrete(name="Metrics", na.translate = F, labels=c("CT","LT100","LT50","TNZ"))+
+  scale_color_discrete(name="Classes")+
+  geom_smooth(aes(color=classBis),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(10,50)+
+  ylim(10,50)+
+  xlab("RL upper bound [°C]")+
+  ylab("FL upper bound [°C]")+
+  theme(legend.title = element_text(face="bold")); p3
+
+
+p2 <- ggplot(MinMaxNewRed, aes(min_iucn, min_exp), na.rm=T)+
+  geom_point(aes(color=classBis, shape=min.metrics))+
+  scale_shape_discrete(name="Metrics", na.translate = F, labels=c("CT","LT100","LT50","LTNZ"))+
+  scale_color_discrete(name="Classes")+
+  geom_smooth(aes(color=classBis),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(-45,35)+
+  ylim(-45,35)+
+  xlab("RL lower bound [°C]")+
+  ylab("FL lower bound [°C]")+
+  theme(legend.title = element_text(face="bold")); p2
+
+p4 <- ggplot(MinMaxNewRed, aes(min_gbif, min_exp), na.rm=T)+
+  geom_point(aes(color=classBis, shape=min.metrics))+
+  scale_shape_discrete(name="Metrics", na.translate = F)+
+  scale_color_discrete(name="Classes")+
+  geom_smooth(aes(color=classBis),method=lm, se=F)+
+  geom_abline(intercept = 0, slope = 1)+
+  xlim(-45,35)+
+  ylim(-45,35)+
+  xlab("RL lower bound [°C]")+
+  ylab("FL lower bound [°C]")+
+  theme(legend.title = element_text(face="bold")); p4
+
+plot <- ggarrange(p1bis,p3,p2,p4, labels=c("A", "B","C","D"), nrow=2, ncol=2, common.legend = T, legend = "right");plot
+
+plot <- ggarrange(p1,p3, labels=c("A", "B"), ncol=2, common.legend = T, legend = "right");plot
+
+plot <- ggarrange(p1bis,p2, labels=c("A", "B"), ncol=2, common.legend = T, legend = "right");plot
+
+
+### p.value iucn
+
+MaxNewVer <- import("Data/MaxNewVer.csv")
+
+df <- MaxNewVer
+df$classBis <- as.factor(df$classBis)
+
+stat.test <- df %>%
+  group_by(classBis) %>%
+  wilcox_test(max1 ~ data.origin1, paired = T)
+stat.test
+
+stat.test <- stat.test %>%
+  add_xy_position(x="classBis", dodge=0.8)
+
+p1 <- ggplot(MaxNewVer)+
+  geom_boxplot(aes(x=classBis, y=max1, fill=data.origin1))+
+  stat_pvalue_manual(stat.test, label = "{p}", y.position = c(50, 56, 53) , label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=classBis, y=max1, group=data.origin1),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = NULL)+
+  scale_fill_manual(values=c("#d84b4b", "#4b8fd8") , labels=c("Physiological", "Observed"))+
+  xlab(NULL)+
+  ylab("upper bound [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p1
+
+
+
+MinNewVer <- import("Data/MinNewVer.csv")
+
+df1 <- MinNewVer
+df1$classBis <- as.factor(df1$classBis)
+
+stat.test1 <- df1 %>%
+  group_by(classBis) %>%
+  wilcox_test(min1 ~ data.origin1, paired = T)
+stat.test1
+
+stat.test1 <- stat.test1 %>%
+  add_xy_position(x="classBis", dodge=0.8)
+
+
+p2 <- ggplot(MinNewVer)+
+  geom_boxplot(aes(x=classBis, y=min1, fill=data.origin1))+
+  stat_pvalue_manual(stat.test1, label = "{p}", y.position = c(40, 54, 47), label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=classBis, y=min1, group=data.origin1),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = NULL)+
+  scale_fill_manual(values=c("#d84b4b", "#4b8fd8") , labels=c("Physiological", "Observed"))+
+  xlab(NULL)+
+  ylab("Lower bound [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p2
+
+ggarrange(p1,p2, labels = c("A", "B"), ncol = 2, common.legend = T, legend="bottom")
+
+
+### p.value gbif
+
+MaxNewVer <- import("Data/MaxNewVer.csv")
+
+df <- MaxNewVer
+df$classBis <- as.factor(df$classBis)
+
+stat.test <- df %>%
+  group_by(classBis) %>%
+  wilcox_test(max2 ~ data.origin2, paired = T)
+stat.test
+
+stat.test <- stat.test %>%
+  add_xy_position(x="classBis", dodge=0.8)
+
+p1 <- ggplot(MaxNewVer)+
+  geom_boxplot(aes(x=classBis, y=max2, fill=data.origin2))+
+  stat_pvalue_manual(stat.test, label = "{p}", y.position = c(50, 56, 53) , label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=classBis, y=max2, group=data.origin2),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = NULL)+
+  scale_fill_manual(values=c("#4b8fd8", "#d84b4b") , labels=c("RL", "FL"))+
+  xlab(NULL)+
+  ylab("upper bound [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p1
+
+
+
+MinNewVer <- import("Data/MinNewVer.csv")
+
+df1 <- MinNewVer
+df1$classBis <- as.factor(df1$classBis)
+
+stat.test1 <- df1 %>%
+  group_by(classBis) %>%
+  wilcox_test(min2 ~ data.origin2, paired = T)
+stat.test1
+
+stat.test1 <- stat.test1 %>%
+  add_xy_position(x="classBis", dodge=0.8)
+
+
+p2 <- ggplot(MinNewVer)+
+  geom_boxplot(aes(x=classBis, y=min2, fill=data.origin2))+
+  stat_pvalue_manual(stat.test1, label = "{p}", y.position = c(40, 54, 47), label.size = 3.5, tip.length = 0.01)+
+  stat_summary(aes(x=classBis, y=min2, group=data.origin2),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  labs(fill = NULL)+
+  scale_fill_manual(values=c("#4b8fd8", "#d84b4b") , labels=c("RL", "FL"))+
+  xlab(NULL)+
+  ylab("lower bound [°C]")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)); p2
+
+ggarrange(ggarrange(p3, p4,labels = c("A", "B"), ncol = 2, common.legend = T, legend="right"), ggarrange(p1,p2, labels = c("C", "D"), ncol = 2, common.legend = T, legend="right"), nrow = 2, common.legend = F)
+
+
+
+
+#### Plot maps max IUCN ####
+
+
+
+MinMaxNewRed <- import("Data/MinMaxNewRed.csv")
+
+bio5.0 <- clim[[5]] / 10
+bio5.2 <- raster("wc_126_2100/band5.tif")
+bio5.8 <- raster("wc_585_2100/band5.tif")
+
+map <- map_data("world", region = c("Australia"))
+
+
+i <- 470
+sp.iucn <- IUCN[IUCN$binomial == MinMaxNewRed$species[i],]
+
+mask <- crop(bio5.0, sp.iucn)
+mask <- mask(mask, sp.iucn)
+mask <- rasterToPoints(mask, spatial = T)
+mask <- data.frame(mask)
+
+
+m1 <- bio5.0 <= MinMaxNewRed$max_iucn[i]
+m1[m1==0] <- NA
+mask1 <- crop(m1, sp.iucn)
+mask1 <- mask(mask1, sp.iucn)
+mask1 <- rasterToPoints(mask1, spatial = T)
+mask1 <- data.frame(mask1)
+
+m2 <- bio5.2 <= MinMaxNewRed$max_iucn[i]
+m2[m2==0] <- NA
+mask2 <- crop(m2, sp.iucn)
+mask2 <- mask(mask2, sp.iucn)
+mask2 <- rasterToPoints(mask2, spatial = T)
+mask2 <- data.frame(mask2)
+
+m3 <- bio5.8 <= MinMaxNewRed$max_iucn[i]
+m3[m3==0] <- NA
+mask3 <- crop(m3, sp.iucn)
+mask3 <- mask(mask3, sp.iucn)
+mask3 <- rasterToPoints(mask3, spatial = T)
+mask3 <- data.frame(mask3)
+
+p1 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="1"))+
+  geom_raster(data=mask1, aes(x=x, y=y, fill="3"))+
+  geom_raster(data=mask2, aes(x=x, y=y, fill="4"))+
+  geom_raster(data=mask3, aes(x=x, y=y, fill="5"))+
+  coord_cartesian(xlim = c(-130, -55), ylim = c(25, 62))+
+  scale_fill_manual(name="" ,values=c("gray","#ebcf4f","#e1c029", "#e19e29"), 
+                    labels=c("Background","Observed range (actual)", "Observed range (SSP 1_2.6)", "Observed range (SSP 5_8.5)"))+
+  theme_void()+
+  theme(legend.position = c(0.86,0.2)); p1
+
+
+
+
+
+
+
+m4 <- bio5.0 <= MinMaxNewRed$max_exp[i]
+m4[m4==0] <- NA
+mask4 <- crop(m4, sp.iucn)
+mask4 <- mask(mask4, sp.iucn)
+mask4 <- rasterToPoints(mask4, spatial = T)
+mask4 <- data.frame(mask4)
+
+m5 <- bio5.2 <= MinMaxNewRed$max_exp[i]
+m5[m5==0] <- NA
+mask5 <- crop(m5, sp.iucn)
+mask5 <- mask(mask5, sp.iucn)
+mask5 <- rasterToPoints(mask5, spatial = T)
+mask5 <- data.frame(mask5)
+
+m6 <- bio5.8 <= MinMaxNewRed$max_exp[i]
+m6[m6==0] <- NA
+mask6 <- crop(m6, sp.iucn)
+mask6 <- mask(mask6, sp.iucn)
+mask6 <- rasterToPoints(mask6, spatial = T)
+mask6 <- data.frame(mask6)
+
+p2 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="1"))+
+  geom_raster(data=mask4, aes(x=x, y=y, fill="3"))+
+  geom_raster(data=mask5, aes(x=x, y=y, fill="4"))+
+  geom_raster(data=mask6, aes(x=x, y=y, fill="5"))+
+  coord_cartesian(xlim = c(-130, -55), ylim = c(25, 62))+
+  scale_fill_manual(name="" ,values=c("gray","#8ff46f","#55cb30","#2e990d"), 
+                    labels=c("Background","Experimental range (actual)", "Experimental range (SSP 1_2.6)", "Experimental range (SSP 5_8.5)"))+
+  theme_void()+
+  theme(legend.position = c(0.86,0.2)); p2
+
+
+
+
+m7 <- bio5.0 <= MinMaxNewRed$max_exp[i]
+m7[m7==0] <- NA
+n7 <- bio5.0 <= MinMaxNewRed$max_iucn[i]
+n7[n7==1] <- NA
+mask7 <- mask(m7, sp.iucn)
+mask7 <- mask(n7, mask7)
+mask7 <- crop(mask7, sp.iucn)
+mask7 <- rasterToPoints(mask7, spatial = T)
+mask7 <- data.frame(mask7)
+
+
+
+m8 <- bio5.2 <= MinMaxNewRed$max_exp[i]
+m8[m8==0] <- NA
+n8 <- bio5.2 <= MinMaxNewRed$max_iucn[i]
+n8[n8==1] <- NA
+mask8 <- mask(m8, sp.iucn)
+mask8 <- mask(n8, mask8)
+mask8 <- crop(mask8, sp.iucn)
+mask8 <- rasterToPoints(mask8, spatial = T)
+mask8 <- data.frame(mask8)
+
+
+m9 <- bio5.8 <= MinMaxNewRed$max_exp[i]
+m9[m9==0] <- NA
+n9 <- bio5.8 <= MinMaxNewRed$max_iucn[i]
+n9[n9==1] <- NA
+mask9 <- mask(m9, sp.iucn)
+mask9 <- mask(n9, mask9)
+mask9 <- crop(mask9, sp.iucn)
+mask9 <- rasterToPoints(mask9, spatial = T)
+mask9 <- data.frame(mask9)
+
+
+p3 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="1"), alpha=0.3)+
+  geom_raster(data=mask9, aes(x=x, y=y, fill="5"), alpha=0.6)+
+  geom_raster(data=mask8, aes(x=x, y=y, fill="4"), alpha=0.6)+
+  geom_raster(data=mask7, aes(x=x, y=y, fill="3"), alpha=0.6)+
+  coord_cartesian(xlim = c(-130, -55), ylim = c(25, 62))+
+  scale_fill_manual(name="" ,values=c("gray","#5b0808","#aa2a2a", "#ff0000"), 
+                    labels=c("Background","Intermediate range (actual)", "Intermediate range (SSP 1_2.6)", "Intermediate range (SSP 5_8.5)"))+
+  theme_void()+
+  theme(legend.position = c(0.86,0.2)); p3
+
+p3.1 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="1"))+
+  geom_raster(data=mask, aes(x=x, y=y, fill="2"))+
+  geom_raster(data=mask7, aes(x=x, y=y, fill="3"))+
+  coord_cartesian(xlim = c(-130, -55), ylim = c(25, 62))+
+  scale_fill_manual(name="" ,values=c("gray","#dad8cd","#76e353"), 
+                    labels=c("Background","Range IUCN","Intermediate range (actual)"))+
+  theme_void()+
+  theme(legend.position = c(0.86,0.2)); p3.1
+
+p3.2 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="1"))+
+  geom_raster(data=mask, aes(x=x, y=y, fill="2"))+
+  geom_raster(data=mask8, aes(x=x, y=y, fill="3"))+
+  coord_cartesian(xlim = c(-130, -55), ylim = c(25, 62))+
+  scale_fill_manual(name="" ,values=c("gray","#dad8cd","#34cb30"), 
+                    labels=c("Background","Range IUCN","Intermediate range (SSP 1_2.6)"))+
+  theme_void()+
+  theme(legend.position = c(0.86,0.2)); p3.2
+
+p3.3 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="1"))+
+  geom_raster(data=mask, aes(x=x, y=y, fill="2"))+
+  geom_raster(data=mask9, aes(x=x, y=y, fill="3"))+
+  coord_cartesian(xlim = c(-130, -55), ylim = c(25, 62))+
+  scale_fill_manual(name="" ,values=c("gray","#dad8cd","#0d9c09"), 
+                    labels=c("Background","Range IUCN","Intermediate range (SSP 5_8.5)"))+
+  theme_void()+
+  theme(legend.position = c(0.86,0.2)); p3.3
+
+
+fin <- fin
+
+#### Mise en commun de la figure max IUCN géante ####
+
+
+
+PropNew <- import("Data/PropNew.csv")
+
+PropNew$max.int.iucn <- abs(PropNew$max.int.iucn)
+PropNew$max.int.gbif <- abs(PropNew$max.int.gbif)
+PropNew$min.int.iucn <- abs(PropNew$min.int.iucn)
+PropNew$min.int.gbif <- abs(PropNew$min.int.gbif)
+
+final <- as.data.frame(NULL)
+for (i in 1:length(PropNew$species)) {
+  max.ns.iucn <- 1 - max(c(PropNew$max.obs.iucn[i],PropNew$max.exp.iucn[i]))
+  max.ns.gbif <- 1 - max(c(PropNew$max.obs.gbif[i],PropNew$max.exp.gbif[i]))
+  min.ns.iucn <- 1 - max(c(PropNew$min.obs.iucn[i],PropNew$min.exp.iucn[i]))
+  min.ns.gbif <- 1 - max(c(PropNew$min.obs.gbif[i],PropNew$min.exp.gbif[i]))
+  
+  tmp <- as.data.frame(cbind(max.ns.iucn,max.ns.gbif,min.ns.iucn,min.ns.gbif))
+  final <- rbind(final, tmp)
+}
+
+PropNew <- cbind(PropNew,final)
+PropNew[17:32] <- PropNew[17:32]*100
+
+
+
+
+p1 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.obs.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.obs.iucn, group=projection, label = ..p.signif..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.obs.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("RL suitability\n[% of geographic range]")+
+  scale_fill_manual(values=c("#76e353","#34cb30", "#0d9c09"), labels=c("Current", "2100 (RCP 2.6)", "2100 (RCP 8.5)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1), 
+        legend.position = "top"); p1
+
+p2 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.exp.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.exp.iucn, group=projection, label = ..p.signif..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.exp.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("FL suitability\n[% of geographic range]")+
+  scale_fill_manual(values=c("#a6f4f3","#53dfde","#17c5c4"), labels=c("Current", "2100 (RCP 2.6)", "2100 (RCP 8.5)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1), 
+        legend.position = "top"); p2
+
+p3 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.int.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.int.iucn, group=projection, label = ..p.signif..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.int.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("RF potential suitability\n[% of geographic range]")+
+  scale_fill_manual(values=c("#ebcf4f","#e1c029", "#e19e29"), labels=c("Current", "2100 (RCP 2.6)", "2100 (RCP 8.5)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1), 
+        legend.position = "top"); p3
+
+p4 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.ns.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.ns.iucn, group=projection, label = ..p.signif..), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.ns.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("Unsuitable ranges\n[proportion of geographic range]")+
+  scale_fill_manual(values=c("#f96464","#da1616", "#a70d0d"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p4
+
+
+maskbis <- mask[,-1]
+r <- rasterFromXYZ(maskbis)
+pp <- rasterToPolygons(r, dissolve=T)
+outline <- fortify(pp)
+
+p7 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="t1"))+
+  geom_raster(data=mask, aes(x=x, y=y, fill="t3"))+
+  geom_raster(data=mask4, aes(x=x, y=y, fill="t5"))+
+  geom_raster(data=mask1, aes(x=x, y=y, fill="t4"))+
+  geom_path(aes(x = long, y = lat, group=group, col="black"), data = outline, size=1)+
+  scale_color_manual(name="", values="#494945", labels="IUCN geographic range")+
+  coord_fixed(xlim = c(112, 154), ylim = c(-45, -10), ratio=1)+
+  scale_fill_manual(name="" ,values=c(t1= "gray",t4="#34cb30",t5="#e1c029",t3="#e12c00"),  
+                    labels=c("Background",'"RL suitability" range', '"RF potential suitability" range', "Unsuitable range"))+
+  theme_void(base_size = 10)+
+  theme(legend.position = c(0.82,0.15), panel.border = element_rect(colour="white",fill=NA, size=5), legend.key.size=unit(.7, "lines"), legend.text = element_text(size = 9))+
+  guides(fill=guide_legend(nrow=4)); p7
+
+p8 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="t1"))+
+  geom_raster(data=mask, aes(x=x, y=y, fill="t3"))+
+  geom_raster(data=mask5, aes(x=x, y=y, fill="t5"))+
+  geom_raster(data=mask2, aes(x=x, y=y, fill="t4"))+
+  geom_path(aes(x = long, y = lat, group=group, col="black"), data = outline, size=1)+
+  scale_color_manual(name="", values="#494945", labels="Range IUCN")+
+  coord_fixed(xlim = c(112, 154), ylim = c(-45, -10), ratio=1)+
+  scale_fill_manual(name="" ,values=c(t1= "gray",t4="#34cb30",t5="#e1c029",t3="#e12c00"), 
+                    labels=c("Background","RL suitable range", "Potentially suitable range", "Unsuitable range"))+
+  theme_void(base_size = 10)+
+  theme(legend.position = c(0.82,0.15), panel.border = element_rect(colour="white",fill=NA, size=5), legend.key.size=unit(.7, "lines"))+
+  guides(fill=guide_legend(nrow=4)); p8
+
+p9 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="t1"))+
+  geom_raster(data=mask, aes(x=x, y=y, fill="t3"))+
+  geom_raster(data=mask6, aes(x=x, y=y, fill="t5"))+
+  geom_raster(data=mask3, aes(x=x, y=y, fill="t4"))+
+  coord_fixed(xlim = c(112, 154), ylim = c(-45, -10), ratio=1)+
+  geom_path(aes(x = long, y = lat, group=group, col="black"), data = outline, size=1)+
+  scale_color_manual(name="", values="#494945", labels="Range IUCN")+
+  scale_fill_manual(name="" ,values=c(t1= "gray",t4="#34cb30",t5="#e1c029",t3="#e12c00"),  
+                    labels=c("Background","RL suitable range", "Potentially suitable range", "Unsuitable range"))+
+  theme_void(base_size = 10)+
+  theme(legend.position = c(0.82,0.15), panel.border = element_rect(colour="white",fill=NA, size=5), legend.key.size=unit(.7, "lines"))+
+  guides(fill=guide_legend(nrow=4)); p9
+
+plot <- ggarrange(ggarrange(p7,p8,p9, labels=c("A", "B", "C"), ncol=1, label.x=0, common.legend = T, legend="bottom"), ggarrange(p1,p2,p3, labels=c("D","E","F"), ncol=1), ncol=2, heights=c(1,1));plot
+annotate_figure(plot, bottom = text_grob("...", 
+                                      color = "white", face = "bold", size = 1))
+
+plot <- ggarrange(ggarrange(p7,p8,p9, labels=c("     Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"), nrow=1, label.x=-0.25, common.legend = T, legend="right"), ggarrange(ggarrange(p1,p2, labels=c("A","B"), nrow=2),p3, labels=c("","C"), ncol=2), nrow=2, heights=c(2,7));plot
+plot <- ggarrange(ggarrange(p7,p8,p9, labels=c("     Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"), nrow=1, label.x=-0.25, common.legend = T, legend="right"), ggarrange(p1,p2,p3,p4, labels=c("A","B","C","D"), ncol=2, nrow=2), nrow=2, heights=c(2,7));plot
+
+
+p1 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.obs.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.obs.iucn, group=projection, label = ..p.format..), size=3.1, label.y=1.20, vjust=T, method="kruskal.test", na.rm=T)+
+  stat_summary(aes(x=classBis, y=max.obs.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,0.25,0.5,0.75,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("proportion of range under observed UTL")+
+  scale_fill_manual(values=c("#76e353","#34cb30", "#0d9c09"), labels=c("Current", "RCP 2.6", "RCP 8.5"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p1
+
+p2 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.exp.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.exp.iucn, group=projection, label = ..p.format..), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.exp.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,0.25,0.5,0.75,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("proportion of range under physiological UTL")+
+  scale_fill_manual(values=c("#a6f4f3","#53dfde","#17c5c4"), labels=c("Current", "RCP 2.6", "RCP 8.5"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p2
+
+p3 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.int.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.int.iucn, group=projection, label = ..p.format..), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.int.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("proportion of range between observed UTL and physiological UTL")+
+  scale_fill_manual(values=c("#ebcf4f","#e1c029", "#e19e29"), labels=c("Current", "RCP 2.6", "RCP 8.5"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p3
+
+p4 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.ns.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.ns.iucn, group=projection, label = ..p.format..), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.ns.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("Unsuitable ranges\n[proportion of geographic range]")+
+  scale_fill_manual(values=c("#f96464","#da1616", "#a70d0d"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p4
+
+plot <- ggarrange(p1,p2,p3,p4, labels=c("A","B","C","D"), ncol=2, nrow=2); plot
+
+
+### Metrics
+
+PropNewT <- filter(PropNew, !is.na(max.metrics))
+PropNewT <- filter(PropNew, !is.na(min.metrics))
+
+p1 <- ggplot(PropNewT)+
+  geom_boxplot(aes(max.metrics, max.obs.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=max.metrics, y=max.obs.gbif, group=projection, label = paste0("p = ", ..p.format..,"\n", ..p.signif..)), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=max.metrics, y=max.obs.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = "Projections")+
+  xlab(NULL)+
+  ylab("proportion of range sustainable\naccording to observed lower limits")+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p1
+
+p2 <- ggplot(PropNewT)+
+  geom_boxplot(aes(max.metrics, max.exp.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=max.metrics, y=max.exp.gbif, group=projection, label = paste0("p = ", ..p.format..,"\n", ..p.signif..)), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=max.metrics, y=max.exp.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = "Projections")+
+  xlab(NULL)+
+  ylab("proportion of range sustainable\naccording to experimental lower limits")+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p2
+
+p3 <- ggplot(PropNewT)+
+  geom_boxplot(aes(max.metrics, max.int.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=max.metrics, y=max.int.gbif, group=projection, label = paste0("p = ", ..p.format..,"\n", ..p.signif..)), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=max.metrics, y=max.int.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = "Projections")+
+  xlab(NULL)+
+  ylab("proportion of intermediate ranges")+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p3
+
+plot <- ggarrange(ggarrange(p1,p2, labels=c("A","B"), nrow=2, legend=F), p3, labels=c("","C"),ncol=2, common.legend = T, legend = "top")
+annotate_figure(plot, top = text_grob("Max GBIF", 
+                                      color = "red", face = "bold", size = 14))
+
+
+
+fin <- fin
+
+#### Plot map max GBIF ####
+
+sp <- MinMaxNewRed$species[i]
+SpSub <- subset(GBIF, species == sp)
+x <- SpSub$decimallongitude
+y <- SpSub$decimallatitude
+Occ.gbif <- as.data.frame(cbind(x,y))
+
+mask10 <- crop(bio5.0, Occ.gbif)
+mask10 <- rasterize(Occ.gbif, mask10, mask=T)
+mask10 <- rasterToPoints(mask10, spatial = T)
+mask10 <- data.frame(mask10)
+
+p3.1 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="1"))+
+  geom_raster(data=mask10, aes(x=x, y=y, fill="2"))+
+  coord_cartesian(xlim = c(-130, -55), ylim = c(25, 62))+
+  scale_fill_manual(name="" ,values=c("gray","red"), 
+                    labels=c("Background","Range GBIF"))+
+  theme_void()+
+  theme(legend.position = c(0.86,0.2)); p3.1
+
+## Le résultat ne rend rien de bien visible
+
+
+#### Plot map min IUCN ####
+
+bio6.0 <- clim[[6]] / 10
+bio6.2 <- raster("wc_126_2100/band6.tif")
+bio6.8 <- raster("wc_585_2100/band6.tif")
+
+
+map <- map_data("world", region = c("Australia"))
+
+i <- 470
+sp.iucn <- IUCN[IUCN$binomial == MinMaxNewRed$species[i],]
+
+mask <- crop(bio6.0, sp.iucn)
+mask <- mask(mask, sp.iucn)
+mask <- rasterToPoints(mask, spatial = T)
+mask <- data.frame(mask)
+
+
+m1 <- bio6.0 >= MinMaxNewRed$min_iucn[i]
+m1[m1==0] <- NA
+mask1 <- crop(m1, sp.iucn)
+mask1 <- mask(mask1, sp.iucn)
+mask1 <- rasterToPoints(mask1, spatial = T)
+mask1 <- data.frame(mask1)
+
+m2 <- bio6.2 >= MinMaxNewRed$min_iucn[i]
+m2[m2==0] <- NA
+mask2 <- crop(m2, sp.iucn)
+mask2 <- mask(mask2, sp.iucn)
+mask2 <- rasterToPoints(mask2, spatial = T)
+mask2 <- data.frame(mask2)
+
+m3 <- bio6.8 >= MinMaxNewRed$min_iucn[i]
+m3[m3==0] <- NA
+mask3 <- crop(m3, sp.iucn)
+mask3 <- mask(mask3, sp.iucn)
+mask3 <- rasterToPoints(mask3, spatial = T)
+mask3 <- data.frame(mask3)
+
+m4 <- bio6.0 >= MinMaxNewRed$min_exp[i]
+m4[m4==0] <- NA
+mask4 <- crop(m4, sp.iucn)
+mask4 <- mask(mask4, sp.iucn)
+mask4 <- rasterToPoints(mask4, spatial = T)
+mask4 <- data.frame(mask4)
+
+m5 <- bio6.2 >= MinMaxNewRed$min_exp[i]
+m5[m5==0] <- NA
+mask5 <- crop(m5, sp.iucn)
+mask5 <- mask(mask5, sp.iucn)
+mask5 <- rasterToPoints(mask5, spatial = T)
+mask5 <- data.frame(mask5)
+
+m6 <- bio6.8 >= MinMaxNewRed$min_exp[i]
+m6[m6==0] <- NA
+mask6 <- crop(m6, sp.iucn)
+mask6 <- mask(mask6, sp.iucn)
+mask6 <- rasterToPoints(mask6, spatial = T)
+mask6 <- data.frame(mask6)
+
+#### Mise en commun de la figure min IUCN ####
+
+PropNew <- import("Data/PropNew.csv")
+
+p1 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.obs.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.obs.iucn, group=projection, label = ..p.signif..), size=3.1, label.y=100.12, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.obs.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(99.4,99.6,99.8,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("RL suitability\n[% of geographic range]")+
+  scale_fill_manual(values=c("#76e353","#34cb30", "#0d9c09"), labels=c("Current", "2100 (RCP 2.6)", "2100 (RCP 8.5)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1), 
+        legend.position = "top"); p1
+
+p2 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.exp.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.exp.iucn, group=projection, label = ..p.signif..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.exp.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("FL suitablity\n[% of geographic range]")+
+  scale_fill_manual(values=c("#a6f4f3","#53dfde","#17c5c4"), labels=c("Current", "2100 (RCP 2.6)", "2100 (RCP 8.5)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1), 
+        legend.position = "top"); p2
+
+p3 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.int.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.int.iucn, group=projection, label = ..p.signif..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.int.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("RF potential suitability\n[% of geographic range]")+
+  scale_fill_manual(values=c("#ebcf4f","#e1c029", "#e19e29"), labels=c("Current", "2100 (RCP 2.6)", "2100 (RCP 8.5)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1), 
+        legend.position = "top"); p3
+
+p4 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.ns.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.ns.iucn, group=projection, label = ..p.signif..), size=3.1, label.y=0.008, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.ns.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,0.002,0.004,0.006))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("Unsuitable ranges\n[proportion of geographic range]")+
+  scale_fill_manual(values=c("#f96464","#da1616", "#a70d0d"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p4
+
+maskbis <- mask[,-1]
+r <- rasterFromXYZ(maskbis)
+pp <- rasterToPolygons(r, dissolve=T)
+outline <- fortify(pp)
+
+p7 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="t1"))+
+  geom_raster(data=mask, aes(x=x, y=y, fill="t3"))+
+  geom_raster(data=mask1, aes(x=x, y=y, fill="t4"))+
+  geom_raster(data=mask4, aes(x=x, y=y, fill="t5"))+
+  geom_path(aes(x = long, y = lat, group=group, col="black"), data = outline, size=1)+
+  scale_color_manual(name="", values="#494945", labels="IUCN geographic range")+
+  coord_fixed(xlim = c(112, 154), ylim = c(-45, -10), ratio=1)+
+  scale_fill_manual(name="" ,values=c(t1= "gray",t5="#17c5c4",t4="#e1c029",t3="#e12c00"),  
+                    labels=c("Background", '"FL suitability" range', '"RF potential suitability" range', "Unsuitable range"))+
+  theme_void(base_size = 10)+
+  theme(legend.position = c(0.82,0.15), panel.border = element_rect(colour="white",fill=NA, size=5), legend.key.size=unit(.7, "lines"), legend.text = element_text(size = 9))+
+  guides(fill=guide_legend(nrow=4)); p7
+
+p8 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="t1"))+
+  geom_raster(data=mask, aes(x=x, y=y, fill="t3"))+
+  geom_raster(data=mask2, aes(x=x, y=y, fill="t4"))+
+  geom_raster(data=mask5, aes(x=x, y=y, fill="t5"))+
+  geom_path(aes(x = long, y = lat, group=group, col="black"), data = outline, size=1)+
+  scale_color_manual(name="", values="#494945", labels="Range IUCN")+
+  coord_fixed(xlim = c(112, 154), ylim = c(-45, -10), ratio=1)+
+  scale_fill_manual(name="" ,values=c(t1= "gray",t5="#17c5c4",t4="#e1c029",t3="#e12c00"), 
+                    labels=c("Background","Suitable range", "Potentially suitable range", "Unsuitable range"))+
+  theme_void(base_size = 10)+
+  theme(legend.position = c(0.82,0.15), panel.border = element_rect(colour="white",fill=NA, size=5), legend.key.size=unit(.7, "lines"))+
+  guides(fill=guide_legend(nrow=4)); p8
+
+p9 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group, fill="t1"))+
+  geom_raster(data=mask, aes(x=x, y=y, fill="t3"))+
+  geom_raster(data=mask3, aes(x=x, y=y, fill="t4"))+
+  geom_raster(data=mask6, aes(x=x, y=y, fill="t5"))+
+  coord_fixed(xlim = c(112, 154), ylim = c(-45, -10), ratio=1)+
+  geom_path(aes(x = long, y = lat, group=group, col="black"), data = outline, size=1)+
+  scale_color_manual(name="", values="#494945", labels="Range IUCN")+
+  scale_fill_manual(name="" ,values=c(t1= "gray",t5="#17c5c4",t4="#e1c029",t3="#e12c00"),  
+                    labels=c("Background","Suitable range", "Potentially suitable range", "Unsuitable range"))+
+  theme_void(base_size = 10)+
+  theme(legend.position = c(0.82,0.15), panel.border = element_rect(colour="white",fill=NA, size=5), legend.key.size=unit(.7, "lines"))+
+  guides(fill=guide_legend(nrow=4)); p9
+
+plot <- ggarrange(ggarrange(p7,p8,p9, labels=c("A", "B", "C"), ncol=1, label.x=0, common.legend = T, legend="bottom"), ggarrange(p1,p2,p3, labels=c("D","E","F"), ncol=1), ncol=2, heights=c(1,1));plot
+annotate_figure(plot, bottom = text_grob("...", 
+                                         color = "white", face = "bold", size = 1))
+
+plot <- ggarrange(ggarrange(p7,p8,p9, labels=c("     Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"), nrow=1, label.x=-0.25, common.legend = T, legend="right"),ggarrange(ggarrange(p1,p2, labels=c("A","B"), nrow=2),p3, labels=c("","C"), ncol=2), nrow=2, heights=c(2,7));plot
+plot <- ggarrange(ggarrange(p7,p8,p9, labels=c("     Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"), nrow=1, label.x=-0.25, common.legend = T, legend="right"), ggarrange(p1,p2,p3,p4, labels=c("A","B","C","D"), ncol=2, nrow=2), nrow=2, heights=c(2,7));plot
+
+
+
+
+p1 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.obs.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.obs.iucn, group=projection, label = ..p.format..), size=3.1, label.y=1.005, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.obs.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0.994,0.996,0.998,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("proportion of range above Observed LTL")+
+  scale_fill_manual(values=c("#a6f4f3","#53dfde","#17c5c4"), labels=c("Current", "RCP 2.6", "RCP 8.5"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p1
+
+p2 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.exp.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.exp.iucn, group=projection, label = ..p.format..), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.exp.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,0.25,0.5,0.75,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("proportion of range above Physiological LTL")+
+  scale_fill_manual(values=c("#76e353","#34cb30", "#0d9c09"), labels=c("Current", "RCP 2.6", "RCP 8.5"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p2
+
+p3 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.int.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.int.iucn, group=projection, label = ..p.format..), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.int.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("proportion of range between Observed LTL and Physiological LTL")+
+  scale_fill_manual(values=c("#ebcf4f","#e1c029", "#e19e29"), labels=c("Current", "RCP 2.6", "RCP 8.5"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p3
+
+p4 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.ns.iucn, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.ns.iucn, group=projection, label = ..p.format..), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.ns.iucn, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("Unsuitable ranges\n[proportion of geographic range]")+
+  scale_fill_manual(values=c("#f96464","#da1616", "#a70d0d"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p4
+
+plot <- ggarrange(p1,p2,p3,p4, labels=c("A","B","C","D"), ncol=2, nrow=2); plot
+
+fin <- fin
+
+#### Mise en commun de la figure max GBIF ####
+
+PropNew <- import("Data/PropNew.csv")
+
+p1 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.obs.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.obs.gbif, group=projection, label = ..p.format..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.obs.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("RL suitability\n[% of geographic range]")+
+  scale_fill_manual(values=c("#76e353","#34cb30", "#0d9c09"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p1
+
+p2 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.exp.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.exp.gbif, group=projection, label = ..p.format..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.exp.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("FL suitability\n[% of geographic range]")+
+  scale_fill_manual(values=c("#a6f4f3","#53dfde","#17c5c4"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p2
+
+p3 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.int.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.int.gbif, group=projection, label = ..p.format..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.int.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("RF potential suitability\n[% of geographic range]")+
+  scale_fill_manual(values=c("#ebcf4f","#e1c029", "#e19e29"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p3
+
+p4 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, max.ns.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=max.ns.gbif, group=projection, label = ..p.format..), size=3.1, label.y=1.20, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=max.ns.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(-1,-0.75,-0.5,-0.25,0,0.25,0.5,0.75,1))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("Unsuitable ranges\n[proportion of geographic range]")+
+  scale_fill_manual(values=c("#f96464","#da1616", "#a70d0d"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p4
+
+plot <- ggarrange(p1,p2,p3, labels=c("A","B","C"), ncol=2, nrow=2); plot
+
+plot <- ggarrange(ggarrange(p1,p2, labels=c("A","B"), nrow=2),p3, labels=c("","","C"),ncol=2); plot
+
+#### Mise en commun de la figure min GBIF ####
+
+PropNew <- import("Data/PropNew.csv")
+
+p1 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.obs.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.obs.gbif, group=projection, label = ..p.format..), size=3.1, label.y=101, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.obs.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(97,98,99,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("RL suitability\n[% of gregraphic range]")+
+  scale_fill_manual(values=c("#76e353","#34cb30", "#0d9c09"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p1
+
+p2 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.exp.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.exp.gbif, group=projection, label = ..p.format..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.exp.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("FL suitability\n[p% of gregraphic range]")+
+  scale_fill_manual(values=c("#a6f4f3","#53dfde","#17c5c4"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p2
+
+p3 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.int.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.int.gbif, group=projection, label = ..p.format..), size=3.1, label.y=120, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.int.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,25,50,75,100))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("RF potential suitability\n[% of gregraphic ranges]")+
+  scale_fill_manual(values=c("#ebcf4f","#e1c029", "#e19e29"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p3
+
+p4 <- ggplot(PropNew)+
+  geom_boxplot(aes(classBis, min.ns.gbif, fill=projection), na.rm=T)+
+  stat_compare_means(aes(x=classBis, y=min.ns.gbif, group=projection, label = ..p.format..), size=3.1, label.y=0.03, vjust=T, method="kruskal.test")+
+  stat_summary(aes(x=classBis, y=min.ns.gbif, group=projection),position=position_dodge(width=0.75), geom="point", fun="mean", col = "black", size = 3, shape = 21, fill="red")+
+  scale_y_continuous(breaks=c(0,0.01,0.02))+
+  labs(fill = element_blank())+
+  xlab(NULL)+
+  ylab("Unsuitable ranges\n[proportion of geographic range]")+
+  scale_fill_manual(values=c("#f96464","#da1616", "#a70d0d"), labels=c("Current", "RCP 2.6 (in 2100)", "RCP 8.5 (in 2100)"))+
+  theme(axis.title.y = element_text(size=10),
+        axis.text = element_text(size = 8),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=9),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+        legend.position = "top"); p4
+
+plot <- ggarrange(p1,p2,p3, labels=c("A","B","C"), ncol=2, nrow=2); plot
+
+plot <- ggarrange(ggarrange(p1,p2, labels=c("A","B"), nrow=2),p3, labels=c("","","C"),ncol=2); plot
+
+
+#### Figure explicative violin ####
+
+bio5 <- clim[[5]] / 10
+bio6 <- clim[[6]] / 10
+
+bio5 <- raster("wc_126_2100/band5.tif")
+bio6 <- raster("wc_126_2100/band6.tif")
+
+bio5 <- raster("wc_585_2100/band5.tif")
+bio6 <- raster("wc_585_2100/band6.tif")
+
+i <- 470
+sp.iucn <- IUCN[IUCN$binomial == MinMaxNewRed$species[i],]
+
+crop <- crop(bio5, sp.iucn)
+grd <- rasterize(sp.iucn[,1], crop, 1, background=0, fun="last")
+
+Occ.iucn <- as.data.frame(grd, xy=T)
+Occ.iucn <- Occ.iucn[which(Occ.iucn[,3]!=0),]
+
+max.iucn <- extract(bio5, Occ.iucn[,1:2], na.rm=T)
+min.iucn <- extract(bio6, Occ.iucn[,1:2], na.rm=T)
+
+tmp <- data.frame(x1=1:167136) ### Pour actual
+tmp$projection <- "Max Current"
+tmp <- cbind(tmp, max.iucn)
+colnames(tmp) <- c("x1", "projection", "values")
+
+tmp3 <- data.frame(x1=1:167136) ### Pour actual
+tmp3$projection <- "Min Current"
+tmp3 <- cbind(tmp3, min.iucn)
+colnames(tmp3) <- c("x1", "projection", "values")
+
+
+tmp1 <- data.frame(x1=1:167136) ### Pour RCP 2.6
+tmp1$projection <- "Max RCP 2.6"
+tmp1 <- cbind(tmp1, max.iucn)
+colnames(tmp1) <- c("x1", "projection", "values")
+
+tmp4 <- data.frame(x1=1:167136) ### Pour RCP 2.6
+tmp4$projection <- "Min RCP 2.6"
+tmp4 <- cbind(tmp4, min.iucn)
+colnames(tmp4) <- c("x1", "projection", "values")
+
+
+tmp2 <- data.frame(x1=1:167136) ### Pour RCP 8.5
+tmp2$projection <- "Max RCP 8.5"
+tmp2 <- cbind(tmp2, max.iucn)
+colnames(tmp2) <- c("x1", "projection", "values")
+
+tmp5 <- data.frame(x1=1:167136) ### Pour RCP 8.5
+tmp5$projection <- "Min RCP 8.5"
+tmp5 <- cbind(tmp5, min.iucn)
+colnames(tmp5) <- c("x1", "projection", "values")
+
+T.s.iucn <- dplyr::bind_rows(tmp, tmp1, tmp2, tmp3, tmp4, tmp5)
+
+write.csv(T.s.iucn, "Data/T.s.iucn.csv")
+
+
+
+sp <- sp.names$species[678]
+length(which((GBIF$species == sp)==T))>0
+SpSub <- subset(GBIF, species == sp)
+x <- SpSub$decimallongitude
+y <- SpSub$decimallatitude
+Occ.gbif <- as.data.frame(cbind(x,y))
+
+max.gbif <- extract(bio5, Occ.gbif[,1:2], cellnumbers=T)
+max.gbif <- as.data.frame(max.gbif)
+max.gbif <- dplyr::distinct(max.gbif)
+colnames(max.gbif) <- c("cells5", "max.gbif")
+
+min.gbif <- extract(bio6, Occ.gbif[,1:2], cellnumbers=T)
+min.gbif <- as.data.frame(min.gbif)
+min.gbif <- dplyr::distinct(min.gbif)
+colnames(min.gbif) <- c("cells6", "min.gbif")
+
+tmp <- data.frame(x1=1:15604) ### Pour actual
+tmp$projection <- "Actual"
+tmp <- cbind(tmp, max.gbif, min.gbif)
+
+tmp1 <- data.frame(x1=1:15604) ### Pour RCP 2.6
+tmp1$projection <- "RCP 2.6"
+tmp1 <- cbind(tmp1, max.gbif, min.gbif)
+
+tmp2 <- data.frame(x1=1:15604) ### Pour RCP 8.5
+tmp2$projection <- "RCP 8.5"
+tmp2 <- cbind(tmp2, max.gbif, min.gbif)
+
+T.s.gbif <- dplyr::bind_rows(tmp, tmp1, tmp2)
+
+write.csv(T.s.gbif, "Data/T.s.gbif.csv")
+
+
+### plot
+T.s.iucn <- import("Data/T.s.iucn.csv")
+T.s.iucn$values <- T.s.iucn$values-0.8
+T.s.iucn$projection <- factor(T.s.iucn$projection, levels = c("Min RCP 8.5", "Min RCP 2.6", "Min Current", "Max RCP 8.5", "Max RCP 2.6", "Max Current"))
+
+a <- MinMaxNewRed$max_iucn[i]
+b <- MinMaxNewRed$max_exp[i]
+c <- MinMaxNewRed$min_iucn[i]
+d <- MinMaxNewRed$min_exp[i]
+
+p1 <- ggplot(T.s.iucn, aes(values, projection, fill=stat(x)))+
+  geom_density_ridges_gradient(scale=0.5, rel_min_height=0.0008, color = "black", na.rm = T)+
+  scale_fill_gradientn(name="", colours = c("#e4ca24", "#e4ca24", "#e4ca24", "#26ac1d","#26ac1d", "#26ac1d", "#26ac1d", "#e4ca24", "#e4ca24", "#e4ca24", "#e4ca24", "#de381d", "#de381d", "#de381d"),values=c(0,0.217,0.218,0.877,0.878,0.934,0.935,1), breaks=c(30,31,32), labels=c("suitable cells", "potentialy suitable cells", "unsuitable cells"))+
+  geom_vline(aes(color= "Observed", xintercept = c), linetype="dashed", size = 1)+
+  geom_vline(aes(color= "Experimental", xintercept = d), linetype="dashed", size=1 )+ 
+  geom_vline(aes(color= "Observed", xintercept = a), linetype="dashed", size = 1)+
+  geom_vline(aes(color= "Experimental", xintercept = b), linetype="dashed", size=1 )+
+  ylab(element_blank())+
+  scale_x_continuous(name="Temperature [°C]", limits=c(-10,50) ,breaks=c(-10,0,10,20,30,40,50))+
+  scale_color_manual(name="", values=c(Observed = "blue", Experimental = "red"), labels=c("Observed thermal limits", "Physiological thermal limits"))+
+  theme(axis.line.x = element_line(color= "black", linetype = "solid")); p1
+  
+p2 <- ggplot(T.s.iucn, aes(max.iucn, projection, fill=stat(x)))+
+  geom_density_ridges_gradient(scale=0.5, rel_min_height=0.001, color = "black")+
+  scale_fill_gradientn(name="", colours = c("#26ac1d","#26ac1d", "#26ac1d", "#e4ca24", "#e4ca24", "#e4ca24", "#e4ca24", "#de381d", "#de381d", "#de381d"),values=c(0,0.637,0.638,0.773,0.774,1), breaks=c(50,51,52), labels=c("suitable cells", "potentialy suitable cells", "unsuitable cells"))+
+  geom_vline(aes(color= "Observed", xintercept = a), linetype="dashed", size = 1)+
+  geom_vline(aes(color= "Experimental", xintercept = b), linetype="dashed", size=1 )+ 
+  ylab(element_blank())+
+  scale_x_continuous(name="Temperature [°C]", limits=c(12,46) ,breaks=c(15,20,25,30,35,40,45))+
+  scale_color_manual(name="", values=c(Observed = "blue", Experimental = "red"), labels=c("IUCN UTL", "Experimental UTL"))+
+  theme(axis.line.x = element_line(color= "black", linetype = "solid")); p2
+  
+T.s.gbif <- import("Data/T.s.gbif.csv")
+T.s.gbif$projection <- factor(T.s.gbif$projection, levels = c("RCP 8.5", "RCP 2.6", "Actual"))
+
+e <- MinMaxNew$max_gbif[678]
+f <- MinMaxNew$min_gbif[678]
+
+p3 <- ggplot(T.s.gbif, aes(min.gbif, projection, fill=stat(x)))+
+  geom_density_ridges_gradient(scale=0.5, rel_min_height=0.001, color = "black")+
+  scale_fill_gradientn(name="", colours = c("#de381d", "#de381d", "#de381d", "#e4ca24", "#e4ca24", "#e4ca24", "#e4ca24", "#26ac1d","#26ac1d", "#26ac1d"),values=c(0,0.256,0.257,0.673,0.674,1), breaks=c(30,31,32), labels=c("suitable cells", "potentialy suitable cells", "unsuitable cells"))+
+  geom_vline(aes(color= "Observed", xintercept = f), linetype="dashed", size = 1)+
+  geom_vline(aes(color= "Experimental", xintercept = d), linetype="dashed", size=1 )+ 
+  ylab(element_blank())+
+  scale_x_continuous(name="Temperature [°C]", limits=c(-31,20) ,breaks=c(-35,-30,-25,-20,-15,-10,-5,0,5,10,15,20))+
+  scale_color_manual(name="", values=c(Observed = "blue", Experimental = "red"), labels=c("GBIF LTL", "Experimental LTL"))+
+  theme(axis.line.x = element_line(color= "black", linetype = "solid")); p3
+
+p4 <- ggplot(T.s.gbif, aes(max.gbif, projection, fill=stat(x)))+
+  geom_density_ridges_gradient(scale=0.5, rel_min_height=0.001, color = "black")+
+  scale_fill_gradientn(name="", colours = c("#26ac1d","#26ac1d", "#26ac1d", "#e4ca24", "#e4ca24", "#e4ca24", "#e4ca24", "#de381d", "#de381d", "#de381d"),values=c(0,0.586,0.587,0.753,0.754,1), breaks=c(50,51,52), labels=c("suitable cells", "potentialy suitable cells", "unsuitable cells"))+
+  geom_vline(aes(color= "Observed", xintercept = e), linetype="dashed", size = 1)+
+  geom_vline(aes(color= "Experimental", xintercept = b), linetype="dashed", size=1 )+ 
+  ylab(element_blank())+
+  scale_x_continuous(name="Temperature [°C]", limits=c(12,46) ,breaks=c(15,20,25,30,35,40,45))+
+  scale_color_manual(name="", values=c(Observed = "blue", Experimental = "red"), labels=c("GBIF UTL", "Experimental UTL"))+
+  theme(axis.line.x = element_line(color= "black", linetype = "solid")); p4
+
+
+plot <- ggarrange(p1,p2,p3,p4, labels=c("Min IUCN", "Max IUCN", "Min GBIF", "Max GBIF"), nrow=2, ncol=2, legend="top"); plot
+
+plot <- ggarrange(ggarrange(p1,p2, labels=c("Min IUCN","Max IUCN"), ncol=2, legend="top"),ggarrange(p3,p4, labels=c("Min GBIF","Max GBIF"), ncol=2, legend="bottom"), nrow=2); plot
+
+ggarrange(p1, legend="bottom")
+
+fin <- fin
+
+
+#### Figure EXPLICATIVE ####
+
+bio5 <- clim[[5]] / 10
+bio6 <- clim[[6]] / 10
+
+bio5 <- raster("wc_126_2100/band5.tif")
+bio6 <- raster("wc_126_2100/band6.tif")
+
+bio5 <- raster("wc_585_2100/band5.tif")
+bio6 <- raster("wc_585_2100/band6.tif")
+
+
+sp.iucn <- IUCN[IUCN$binomial == sp.names$species[3],]
+plot(sp.iucn)
+
+
+map <- map_data("world", region = c("Liberia", "Sierra", "Ivory", "Guinea"), boundaries=T)
+
+mask <- crop(bio5, sp.iucn)
+mask <- mask(mask, sp.iucn)
+mask <- rasterToPoints(mask, spatial = T)
+mask <- data.frame(mask)
+maskbis <- mask[,-1]
+r <- rasterFromXYZ(maskbis)
+pp <- rasterToPolygons(r, dissolve=T)
+outline <- fortify(pp)
+
+p1 <- ggplot(map)+
+  geom_polygon( aes(x=long, y=lat, group=group), fill="grey", color="black")+
+  geom_raster(data=mask, aes(x=x, y=y), fill="green", alpha=0.5)+
+  geom_path(aes(x = long, y = lat, group=group), col="red", data = outline, size=1)+
+  coord_fixed(ratio=1)+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  theme(axis.title.x = element_text(size=35), axis.title.y = element_text(size=35), axis.text = element_blank()); p1
+
+
+
+crop <- crop(bio5, sp.iucn)
+crop <- mask(crop, sp.iucn)
+crop <- rasterToPoints(crop, spatial = T)
+crop1 <- data.frame(crop)
+
+crop <- crop(bio6, sp.iucn)
+crop <- mask(crop, sp.iucn)
+crop <- rasterToPoints(crop, spatial = T)
+crop2 <- data.frame(crop)
+
+
+ggplot()+
+  geom_raster(data=crop1, aes(x=x, y=y, fill=band5))+
+  coord_fixed( ratio=1)+
+  theme_void(base_size = 10)+
+  scale_fill_viridis()+
+  theme(legend.position = "none")
+
+ggplot()+
+  geom_raster(data=crop2, aes(x=x, y=y, fill=band6))+
+  coord_fixed( ratio=1)+
+  theme_void(base_size = 10)+
+  scale_fill_viridis()+
+  theme(legend.position = "none")
+
+
+a <- 15
+b <- 40
+c <- a + (b-a)/4
+d <- b - (b-a)/4
+
+e <- -20
+f <- 5
+g <- e + (f-e)/4
+h <- f - (f-e)/4
+
+
+
+p1 <- ggplot()+
+  geom_hline(aes( yintercept = 1.2),color= "gray", size = 0.1, alpha=0.4)+
+  geom_segment(aes(x = a, y = 1.2, xend = b, yend = 1.2))+
+  geom_curve(aes(x = a, y = 1.2, xend = c, yend = 1.3), curvature = 0.15)+
+  geom_curve(aes(x = c, y = 1.3, xend = d, yend = 1.3), curvature = -0.4)+
+  geom_curve(aes(x = d, y = 1.3, xend = b, yend = 1.2), curvature = 0.15)+
+  
+  geom_hline(aes( yintercept = -0.2),color= "gray", size = 0.1, alpha=0.4)+
+  geom_segment(aes(x = e, y = -0.2, xend = f, yend = -0.2))+
+  geom_curve(aes(x = e, y = -0.2, xend = g, yend = -0.1), curvature = 0.15)+
+  geom_curve(aes(x = g, y = -0.1, xend = h, yend = -0.1), curvature = -0.4)+
+  geom_curve(aes(x = h, y = -0.1, xend = f, yend = -0.2), curvature = 0.15)+
+  
+  geom_vline(aes( xintercept = 40),color= "blue", linetype="dashed", size = 1)+
+  geom_vline(aes( xintercept = 46),color= "red", linetype="dashed", size=1 )+ 
+  #geom_vline(aes( xintercept = 34),color= "red", linetype="dashed", size=0.5 )+
+  annotate("text", x = 42.2, y = 0.3, label = "RL  upper  bound", angle=-90, size=4.8)+
+  annotate("text", x = 48.2, y = 0.3, label = "expected  FL  upper  bound", angle=-90, size=4.8)+
+  #annotate("text", x = 36.2, y = 0.3, label = "not expected FL  upper  bound", angle=-90, size=4.8)+
+  
+  geom_vline(aes( xintercept = -20),color= "blue", linetype="dashed", size = 1)+
+  geom_vline(aes( xintercept = -26),color= "red", linetype="dashed", size=1 )+ 
+  #geom_vline(aes( xintercept = -14),color= "red", linetype="dashed", size=0.5 )+
+  annotate("text", x = -17.8, y = 0.75, label = "RL  lower  bound", angle=-90, size=4.8)+
+  annotate("text", x = -23.8, y = 0.75, label = "expected  FL  lower  bound", angle=-90, size=4.8)+
+  #annotate("text", x = -11.8, y = 0.75, label = "not expected FL  lower  bound", angle=-90, size=4.8)+
+  
+  ylab(element_blank())+
+  xlab("Temperature")+
+  scale_y_continuous(limits = c(-0.4,1.5))+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),legend.position = "none",axis.title.x = element_text(size=15), axis.text.x = element_blank(), axis.text.y=element_blank(), axis.line.x = element_line(color= "black", linetype = "solid")); p1
+
+
+
+
+
+p1 <- ggplot()+
+  geom_hline(aes( yintercept = 4.2),color= "gray", size = 0.1, alpha=0.4)+
+  geom_segment(aes(x = a, y = 4.2, xend = b, yend = 4.2))+
+  geom_curve(aes(x = a, y = 4.2, xend = c, yend = 4.3), curvature = 0.15)+
+  geom_curve(aes(x = c, y = 4.3, xend = d, yend = 4.3), curvature = -0.4)+
+  geom_curve(aes(x = d, y = 4.3, xend = b, yend = 4.2), curvature = 0.15)+
+  geom_segment(mapping=aes(x=15, y=4.15, xend=40, yend=4.15), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#34cb30") +
+  geom_segment(mapping=aes(x=40, y=4.15, xend=46, yend=4.15), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#ebcf4f") +
+  geom_segment(mapping=aes(x=15, y=4.1, xend=46, yend=4.1), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#53dfde") +
+  annotate("text", x = 13.8, y = 4.15, label = "1)", size=4.8)+
+  annotate("text", x = 13.8, y = 4, label = "2)", size=4.8)+
+  geom_segment(mapping=aes(x=15, y=4, xend=40, yend=4), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#34cb30") +
+  geom_segment(mapping=aes(x=40, y=3.95, xend=34, yend=3.95), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#ebcf4f") +
+  geom_segment(mapping=aes(x=15, y=3.95, xend=34, yend=3.95), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#53dfde") +
+  
+  
+  
+  geom_hline(aes( yintercept = 3.5),color= "gray", size = 0.1, alpha=0.4)+
+  geom_segment(aes(x = a+4.5, y = 3.5, xend = b+4.5, yend = 3.5))+
+  geom_curve(aes(x = a+4.5, y = 3.5, xend = c+4.5, yend = 3.6), curvature = 0.15)+
+  geom_curve(aes(x = c+4.5, y = 3.6, xend = d+4.5, yend = 3.6), curvature = -0.4)+
+  geom_curve(aes(x = d+4.5, y = 3.6, xend = b+4.5, yend = 3.5), curvature = 0.15)+
+  
+  geom_hline(aes( yintercept = 3),color= "gray", size = 0.1, alpha=0.4)+
+  geom_segment(aes(x = a+9, y = 3, xend = b+9, yend = 3))+
+  geom_curve(aes(x = a+9, y = 3, xend = c+9, yend = 3.1), curvature = 0.15)+
+  geom_curve(aes(x = c+9, y = 3.1, xend = d+9, yend = 3.1), curvature = -0.4)+
+  geom_curve(aes(x = d+9, y = 3.1, xend = b+9, yend = 3), curvature = 0.15)+
+  
+  
+  geom_hline(aes( yintercept = 2.2),color= "gray", size = 0.1, alpha=0.4)+
+  geom_segment(aes(x = e, y = 2.2, xend = f, yend = 2.2))+
+  geom_curve(aes(x = e, y = 2.2, xend = g, yend = 2.3), curvature = 0.15)+
+  geom_curve(aes(x = g, y = 2.3, xend = h, yend = 2.3), curvature = -0.4)+
+  geom_curve(aes(x = h, y = 2.3, xend = f, yend = 2.2), curvature = 0.15)+
+  geom_segment(mapping=aes(x=-20, y=2.15, xend=5, yend=2.15), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#34cb30") +
+  geom_segment(mapping=aes(x=-26, y=2.15, xend=-20, yend=2.15), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#ebcf4f") +
+  geom_segment(mapping=aes(x=-26, y=2.1, xend=5, yend=2.1), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#53dfde") +
+  annotate("text", x = 6.2, y = 2.15, label = "1)", size=4.8)+
+  annotate("text", x = 6.2, y = 2, label = "2)", size=4.8)+
+  geom_segment(mapping=aes(x=-20, y=2, xend=5, yend=2), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#34cb30") +
+  geom_segment(mapping=aes(x=-14, y=1.95, xend=-20, yend=1.95), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#ebcf4f") +
+  geom_segment(mapping=aes(x=-14, y=1.95, xend=5, yend=1.95), arrow=arrow(ends='both', length = unit(0.015, "npc")), size=0.75, color="#53dfde") +
+  
+  
+  geom_hline(aes( yintercept = 1.5),color= "gray", size = 0.1, alpha=0.4)+
+  geom_segment(aes(x = e+4.5, y = 1.5, xend = f+4.5, yend = 1.5))+
+  geom_curve(aes(x = e+4.5, y = 1.5, xend = g+4.5, yend = 1.6), curvature = 0.15)+
+  geom_curve(aes(x = g+4.5, y = 1.6, xend = h+4.5, yend = 1.6), curvature = -0.4)+
+  geom_curve(aes(x = h+4.5, y = 1.6, xend = f+4.5, yend = 1.5), curvature = 0.15)+
+  
+  geom_hline(aes( yintercept = 1),color= "gray", size = 0.1, alpha=0.4)+
+  geom_segment(aes(x = e+9, y = 1, xend = f+9, yend = 1))+
+  geom_curve(aes(x = e+9, y = 1, xend = g+9, yend = 1.1), curvature = 0.15)+
+  geom_curve(aes(x = g+9, y = 1.1, xend = h+9, yend = 1.1), curvature = -0.4)+
+  geom_curve(aes(x = h+9, y = 1.1, xend = f+9, yend = 1), curvature = 0.15)+
+  
+  geom_vline(aes( xintercept = 40),color= "blue", linetype="dashed", size = 1)+
+  geom_vline(aes( xintercept = 46),color= "red", linetype="dashed", size=1 )+ 
+  geom_vline(aes( xintercept = 34),color= "red", linetype="dashed", size=0.5 )+
+  annotate("text", x = 42.2, y = 1.8, label = "RL  upper  bound", angle=-90, size=4.8)+
+  annotate("text", x = 48.2, y = 1.8, label = "expected  FL  upper  bound", angle=-90, size=4.8)+
+  annotate("text", x = 36.2, y = 1.8, label = "not expected FL  upper  bound", angle=-90, size=4.8)+
+  
+  geom_vline(aes( xintercept = -20),color= "blue", linetype="dashed", size = 1)+
+  geom_vline(aes( xintercept = -26),color= "red", linetype="dashed", size=1 )+ 
+  geom_vline(aes( xintercept = -14),color= "red", linetype="dashed", size=0.5 )+
+  annotate("text", x = -17.8, y = 3.5, label = "RL  lower  bound", angle=-90, size=4.8)+
+  annotate("text", x = -23.8, y = 3.5, label = "expected  FL  lower  bound", angle=-90, size=4.8)+
+  annotate("text", x = -11.8, y = 3.5, label = "not expected FL  lower  bound", angle=-90, size=4.8)+
+  
+  ylab(element_blank())+
+  xlab("Temperature")+
+  scale_y_continuous(limits = c(0.85,4.5))+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),legend.position = "none",axis.title.x = element_text(size=15), axis.text.x = element_blank(), axis.text.y=element_blank(), axis.line.x = element_line(color= "black", linetype = "solid")); p1
+
+
+
+
+fin <- fin
